@@ -62,9 +62,15 @@ _launch_installer() {
     # To ensure a perfectly clean window title in Terminal.app (without args cluttering it),
     # we create a temporary script named "BadWords Setup" and execute it directly.
     local clean_script="$CACHE_DIR/BadWords Setup"
-    echo "#!$py" > "$clean_script"
-    cat "$script" >> "$clean_script"
-    chmod +x "$clean_script"
+    if ! { echo "#!$py" > "$clean_script" && cat "$script" >> "$clean_script" && chmod +x "$clean_script"; }; then
+        # If we can't create the wrapper (e.g. read-only cache dir), fall back to running directly
+        warn "Could not create clean launcher — falling back to direct execution."
+        if [ -n "$LOCAL_REPO" ]; then
+            exec "$py" "$script" --platform macos --bootstrap-python "$py" --local-repo "$LOCAL_REPO" < /dev/tty
+        else
+            exec "$py" "$script" --platform macos --bootstrap-python "$py" < /dev/tty
+        fi
+    fi
     
     if [ -n "$LOCAL_REPO" ]; then
         exec "$clean_script" --platform macos --bootstrap-python "$py" --local-repo "$LOCAL_REPO" < /dev/tty
@@ -118,7 +124,7 @@ step "Looking for compatible Python (3.10+)..."
 PYTHON_BIN=""
 
 # Check common locations in priority order
-for cmd in python3.13 python3.12 python3.11 python3.10 python3 python; do
+for cmd in python3.14 python3.13 python3.12 python3.11 python3.10 python3 python; do
     if command -v "$cmd" &>/dev/null; then
         if "$cmd" -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
             PYTHON_BIN="$(command -v "$cmd")"
@@ -131,16 +137,18 @@ done
 # Homebrew locations (Apple Silicon and Intel)
 if [ -z "$PYTHON_BIN" ]; then
     for brew_py in \
-        /opt/homebrew/bin/python3 \
+        /opt/homebrew/bin/python3.14 \
         /opt/homebrew/bin/python3.13 \
         /opt/homebrew/bin/python3.12 \
         /opt/homebrew/bin/python3.11 \
         /opt/homebrew/bin/python3.10 \
-        /usr/local/bin/python3 \
+        /opt/homebrew/bin/python3 \
+        /usr/local/bin/python3.14 \
         /usr/local/bin/python3.13 \
         /usr/local/bin/python3.12 \
         /usr/local/bin/python3.11 \
-        /usr/local/bin/python3.10; do
+        /usr/local/bin/python3.10 \
+        /usr/local/bin/python3; do
         if [ -x "$brew_py" ]; then
             if "$brew_py" -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
                 PYTHON_BIN="$brew_py"
