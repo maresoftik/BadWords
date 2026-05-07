@@ -144,9 +144,24 @@ def getch():
         try:
             old = termios.tcgetattr(fd)
         except (termios.error, OSError):
-            # stdin is not a TTY (pipe, subshell, CI, etc.) — fallback to plain readline
-            line = sys.stdin.readline()
-            return line[0] if line else "ESC"
+            # stdin is not a TTY (pipe, subshell, etc.) — try /dev/tty directly (macOS Python 3.14+)
+            try:
+                with open("/dev/tty", "rb", buffering=0) as tty_f:
+                    import tty as _tty_mod
+                    tty_fd = tty_f.fileno()
+                    old_tty = termios.tcgetattr(tty_fd)
+                    try:
+                        _tty_mod.setraw(tty_fd)
+                        ch = tty_f.read(1).decode("utf-8", errors="replace")
+                        if ch in ("\x1b", "\x03"):
+                            return "ESC"
+                        return ch if ch else "ESC"
+                    finally:
+                        termios.tcsetattr(tty_fd, termios.TCSADRAIN, old_tty)
+            except (OSError, termios.error):
+                # Last resort: plain readline (CI / headless environments)
+                line = sys.stdin.readline()
+                return line[0] if line else "ESC"
         try:
             tty.setraw(fd)
             ch = sys.stdin.read(1)
@@ -155,7 +170,7 @@ def getch():
                 if r:
                     sys.stdin.read(10)
                 return "ESC"
-            return ch
+            return ch if ch else "ESC"
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 

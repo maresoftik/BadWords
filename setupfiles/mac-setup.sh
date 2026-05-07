@@ -67,9 +67,9 @@ _launch_installer() {
     chmod +x "$clean_script"
     
     if [ -n "$LOCAL_REPO" ]; then
-        exec "$clean_script" --platform macos --bootstrap-python "$py" --local-repo "$LOCAL_REPO"
+        exec "$clean_script" --platform macos --bootstrap-python "$py" --local-repo "$LOCAL_REPO" < /dev/tty
     else
-        exec "$clean_script" --platform macos --bootstrap-python "$py"
+        exec "$clean_script" --platform macos --bootstrap-python "$py" < /dev/tty
     fi
 }
 
