@@ -108,7 +108,7 @@ trap 'rm -rf "$BW_TMP"' EXIT INT TERM
 # ── 1. Find system Python 3.10+ ──────────────────────────────
 step "Looking for compatible Python (3.10+)..."
 PYTHON_BIN=""
-for cmd in python3.13 python3.12 python3.11 python3.10 python3; do
+for cmd in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
     if command -v "$cmd" &>/dev/null; then
         if "$cmd" -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
             PYTHON_BIN="$(command -v "$cmd")"
