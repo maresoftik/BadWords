@@ -297,16 +297,46 @@ def readline_with_esc(show_cursor=True):
         try:
             old = termios.tcgetattr(fd)
         except (termios.error, OSError):
+            # stdin is not a TTY — try /dev/tty directly (macOS Python 3.14+)
             try:
-                return input()
-            except (EOFError, KeyboardInterrupt):
-                raise UserCancelled()
+                tty_raw = open("/dev/tty", "r+b", buffering=0)
+                old_tty = termios.tcgetattr(tty_raw.fileno())
+                import tty as _tty_mod
+                _tty_mod.setraw(tty_raw.fileno())
+                buf_tty = []
+                try:
+                    while True:
+                        ch = tty_raw.read(1).decode("utf-8", errors="replace")
+                        if not ch or ch == "\x03":
+                            raise UserCancelled()
+                        if ch == "\x1b":
+                            raise UserCancelled()
+                        if ch in ("\r", "\n"):
+                            tty_raw.write(b"\r\n"); tty_raw.flush()
+                            return "".join(buf_tty)
+                        if ch in ("\x7f", "\x08"):
+                            if buf_tty:
+                                buf_tty.pop()
+                                tty_raw.write(b"\x08 \x08"); tty_raw.flush()
+                            continue
+                        if ch.isprintable():
+                            buf_tty.append(ch)
+                            tty_raw.write(ch.encode()); tty_raw.flush()
+                finally:
+                    termios.tcsetattr(tty_raw.fileno(), termios.TCSADRAIN, old_tty)
+                    tty_raw.close()
+            except (OSError, termios.error):
+                # Last resort: plain input() for CI / headless environments
+                try:
+                    return input()
+                except (EOFError, KeyboardInterrupt):
+                    raise UserCancelled()
         buf = []
         try:
             tty.setraw(fd)
             while True:
                 ch = sys.stdin.read(1)
-                if ch == "\x03":
+                if not ch or ch == "\x03":
                     raise UserCancelled()
                 if ch == "\x1b":
                     r, _, _ = select.select([sys.stdin], [], [], 0.05)
@@ -396,6 +426,7 @@ def readline_with_esc(show_cursor=True):
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
         return "".join(buf)
+
 
 
 # ── UI ───────────────────────────────────────────────────────
@@ -1144,12 +1175,12 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         # ── Python for venv ───────────────────────────────────
         bootstrap_py = ARGS.bootstrap_python
         target_py = bootstrap_py if os.path.isfile(bootstrap_py) else sys.executable
-        for cmd in ["python3.12", "python3.11", "python3.10", "python3"]:
+        for cmd in ["python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3"]:
             exe = shutil.which(cmd)
             if exe:
                 try:
                     r = subprocess.run([exe, "-c",
-                        "import sys; exit(0 if (3,10) <= sys.version_info < (3,13) else 1)"],
+                        "import sys; exit(0 if (3,10) <= sys.version_info < (3,15) else 1)"],
                         capture_output=True)
                     if r.returncode == 0:
                         target_py = exe
@@ -1299,7 +1330,8 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
 
 
 
-        open(log_file, "a").close()
+        with open(log_file, "a", encoding="utf-8"):
+            pass
         os.chmod(log_file, 0o666)
 
         if force_main:
@@ -1400,15 +1432,18 @@ def option_repair():
                 p = os.path.join(install_dir, item)
                 try:
                     if os.path.isdir(p):
-                        def on_rm_error(func, path, exc_info):
+                        def _make_writable(func, path, exc_info=None, *, _exc=None):
                             import stat
                             try:
-                                current_mode = os.stat(path).st_mode
-                                os.chmod(path, current_mode | stat.S_IWRITE)
-                                func(path)
+                                os.chmod(path, os.stat(path).st_mode | stat.S_IWRITE)
+                                (func)(path)
                             except Exception:
                                 pass
-                        shutil.rmtree(p, onerror=on_rm_error)
+                        # Python 3.12+ uses onexc=, older versions use onerror=
+                        try:
+                            shutil.rmtree(p, onexc=_make_writable)
+                        except TypeError:
+                            shutil.rmtree(p, onerror=_make_writable)  # noqa: deprecated
                         if os.path.exists(p):
                             if os.name == "nt":
                                 subprocess.run(["cmd", "/c", "rmdir", "/s", "/q", p], capture_output=True)
@@ -1567,12 +1602,12 @@ def option_move():
     # Pick best available Python
     bootstrap_py = ARGS.bootstrap_python
     target_py = bootstrap_py if os.path.isfile(bootstrap_py) else sys.executable
-    for cmd in ["python3.12", "python3.11", "python3.10", "python3"]:
+    for cmd in ["python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3"]:
         exe = shutil.which(cmd)
         if exe:
             try:
                 r = subprocess.run([exe, "-c",
-                    "import sys; exit(0 if (3,10) <= sys.version_info < (3,13) else 1)"],
+                    "import sys; exit(0 if (3,10) <= sys.version_info < (3,15) else 1)"],
                     capture_output=True)
                 if r.returncode == 0:
                     target_py = exe
@@ -1942,15 +1977,18 @@ def _do_uninstall(resolve_dirs, all_install_dirs):
         log_step(f"Deleting: {install_dir}")
         sp = Spinner(f"Removing {os.path.basename(install_dir)}").start()
         try:
-            def on_rm_error(func, path, exc_info):
+            def _make_writable_uninstall(func, path, exc_info=None, *, _exc=None):
                 import stat
                 try:
                     os.chmod(path, stat.S_IWRITE)
-                    func(path)
+                    (func)(path)
                 except Exception:
                     pass
-            
-            shutil.rmtree(install_dir, onerror=on_rm_error)
+            # Python 3.12+ uses onexc=, older versions use onerror=
+            try:
+                shutil.rmtree(install_dir, onexc=_make_writable_uninstall)
+            except TypeError:
+                shutil.rmtree(install_dir, onerror=_make_writable_uninstall)  # noqa: deprecated
             
             # Robust OS-level fallback if Python's rmtree fails on tricky symlinks/permissions
             if os.path.exists(install_dir):
