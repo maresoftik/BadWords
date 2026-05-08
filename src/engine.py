@@ -2147,95 +2147,109 @@ except Exception as e:
             # No need to pass it further down the XML pipeline.
 
             # ──────────────────────────────────────────────────────────────────
-            # PRIMARY PATH: XML BUILD + IMPORT
+            # PRIMARY PATH: EXPORT → CUT → IMPORT  (all timeline types)
             # ──────────────────────────────────────────────────────────────────
-            xml_success = False
-            xml_tl_name = None
+            # We use Resolve's OWN FCP7 XML export as the base, then apply the
+            # op-cuts to it. This preserves ALL clip types: regular video/audio,
+            # adjustment clips, generators, Fusion comps, clips from other sources.
+            # importSourceClips:False tells Resolve to link to EXISTING pool items
+            # (the clips are already there from the user's original timeline),
+            # preventing any source clip duplication or new folder creation.
+            xml_success  = False
+            xml_tl_name  = None
+            src_xml_path = ""  # initialised before try so finally block can reference them
+            cut_xml_path = ""
 
             try:
                 temp_dir = self.os_doc.get_temp_folder()
                 os.makedirs(temp_dir, exist_ok=True)
                 safe_name = "".join(c for c in new_tl_name if c.isalnum() or c in '_-')
-                xml_path  = os.path.join(temp_dir, f"bw_edit_{safe_name}.xml")
+                src_xml_path = os.path.join(temp_dir, f"bw_src_{safe_name}.xml")
+                cut_xml_path = os.path.join(temp_dir, f"bw_cut_{safe_name}.xml")
 
+                # Step 1: Export source timeline XML (Resolve native, all clip types)
                 set_status(self.txt("status_assembly_xml_build"))
                 set_progress(-1)
-
-                ok_build, color_schedule = self.resolve_handler.build_edit_xml_from_ops(
-                    ops                  = clean_ops,
-                    source_tl_name       = original_tl_name,
-                    new_tl_name          = new_tl_name,
-                    track_indices        = track_indices if not all_tracks_selected else [],
-                    audio_only_mode      = audio_only_mode,
-                    output_path          = xml_path,
-                    preserve_track_order = preserve_track_order,
+                export_ok = self.resolve_handler.export_timeline_xml(
+                    original_tl_name, src_xml_path
                 )
-
-                if ok_build:
-                    set_status(self.txt("status_assembly_xml_import"))
-                    set_progress(-1)
-
-                    # ── SET FOLDER: Resources for source clips, Edits for the TL ─────
-                    # Source clips from the XML import land in the CURRENT folder.
-                    # We want source clips in BadWords/Resources, not Edits.
-                    # After import, we move only the timeline's MediaPoolItem to Edits.
-                    resources_bin = self.resolve_handler.get_badwords_resources_bin()
-                    edits_bin     = self.resolve_handler.get_badwords_edits_bin()
-                    if resources_bin:
-                        try:
-                            self.resolve_handler.media_pool.SetCurrentFolder(resources_bin)
-                        except Exception:
-                            pass
-
-                    import_options = {
-                        "timelineName":      new_tl_name,
-                        "importSourceClips": True,
-                    }
-                    new_tl = self.resolve_handler.media_pool.ImportTimelineFromFile(
-                        xml_path, import_options
+                if not export_ok:
+                    log_error("assemble_timeline: source XML export failed.")
+                else:
+                    # Step 2: Apply op-cuts to the exported XML
+                    ok_cut, color_schedule = self.resolve_handler.apply_ops_cuts_to_timeline_xml(
+                        src_xml_path, clean_ops, cut_xml_path
                     )
 
-                    if new_tl:
-                        actual_name = new_tl.GetName()
-                        log_info(f"assemble_timeline: XML import OK → '{actual_name}'")
-                        xml_tl_name = actual_name
+                    if ok_cut:
+                        set_status(self.txt("status_assembly_xml_import"))
+                        set_progress(-1)
 
-                        # Move the assembled timeline to Edits bin.
-                        # Source clips stay in Resources (where they landed on import).
-                        if edits_bin:
-                            try:
-                                tl_item = self.resolve_handler.find_timeline_item_recursive(
-                                    self.resolve_handler.media_pool.GetRootFolder(), actual_name
-                                )
-                                if tl_item:
-                                    self.resolve_handler.media_pool.MoveClips([tl_item], edits_bin)
-                                    log_info(f"assemble_timeline: moved '{actual_name}' → BadWords/Edits")
-                                else:
-                                    log_error("assemble_timeline: could not locate timeline item in pool")
-                            except Exception as move_err:
-                                log_error(f"assemble_timeline: MoveClips error: {move_err}")
+                        # Import modified XML.
+                        # Non-file-backed clips (adjustment clips etc.) have had their
+                        # <file> elements stripped, so importSourceClips:True no longer
+                        # fails on them. File-backed clips (.wav, .mp4, etc.) retain their
+                        # <file><pathurl> and are correctly linked to existing pool items.
+                        
+                        # CRITICAL: Reset current folder to Root before import.
+                        # If a subfolder (like 'BadWords/') is currently active, Resolve
+                        # might fail to link to existing clips in Master and instead
+                        # import fresh copies (creating "clip copy" duplicates) into the
+                        # active folder. Setting Root ensures global pool search.
+                        root_folder = self.resolve_handler.media_pool.GetRootFolder()
+                        if root_folder:
+                            self.resolve_handler.media_pool.SetCurrentFolder(root_folder)
 
-                        # ── Verify/correct clip colors (precise schedule) ──────────
-                        set_status(self.txt("status_assembly_colors"))
-                        self.resolve_handler.reapply_clip_colors(xml_tl_name, color_schedule)
+                        new_tl = self.resolve_handler.media_pool.ImportTimelineFromFile(
+                            cut_xml_path,
+                            {"timelineName": new_tl_name, "importSourceClips": True},
+                        )
 
-                        xml_success = True
+
+                        if new_tl:
+                            actual_name = new_tl.GetName()
+                            log_info(f"assemble_timeline: XML import OK → '{actual_name}'")
+                            xml_tl_name = actual_name
+
+                            # Move timeline directly into BadWords/ root bin (no Edits subfolder).
+                            bw_bin = self.resolve_handler.get_badwords_root_bin()
+                            if bw_bin:
+                                try:
+                                    tl_item = self.resolve_handler.find_timeline_item_recursive(
+                                        self.resolve_handler.media_pool.GetRootFolder(), actual_name
+                                    )
+                                    if tl_item:
+                                        self.resolve_handler.media_pool.MoveClips([tl_item], bw_bin)
+                                        log_info(f"assemble_timeline: moved '{actual_name}' → BadWords/")
+                                    else:
+                                        log_error("assemble_timeline: timeline item not found in pool")
+                                except Exception as move_err:
+                                    log_error(f"assemble_timeline: MoveClips error: {move_err}")
+
+                            # Apply / verify clip colors
+                            set_status(self.txt("status_assembly_colors"))
+                            self.resolve_handler.reapply_clip_colors(xml_tl_name, color_schedule)
+
+                            xml_success = True
+                        else:
+                            log_error("assemble_timeline: ImportTimelineFromFile returned None.")
                     else:
-                        log_error("assemble_timeline: ImportTimelineFromFile returned None.")
-                else:
-                    log_error("assemble_timeline: XML build failed.")
-
-                # Cleanup temp XML regardless of success
-                try:
-                    if os.path.exists(xml_path):
-                        os.remove(xml_path)
-                except Exception:
-                    pass
+                        log_error("assemble_timeline: apply_ops_cuts_to_timeline_xml failed.")
 
             except Exception as xml_err:
                 log_error(f"assemble_timeline: XML path exception: {xml_err}")
                 import traceback as _tb
                 log_error(_tb.format_exc())
+            finally:
+                # Cleanup temp XMLs
+                for _p in (src_xml_path, cut_xml_path):
+                    try:
+                        if os.path.exists(_p):
+                            os.remove(_p)
+                    except Exception:
+                        pass
+
+
 
             # ──────────────────────────────────────────────────────────────────
             # ABSOLUTE EMERGENCY FALLBACK: AppendToTimeline
