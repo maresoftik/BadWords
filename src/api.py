@@ -901,11 +901,241 @@ class ResolveHandler:
             log_error(f"filter_xml_tracks error: {e}")
             return False
 
+    def apply_ops_cuts_to_timeline_xml(self, xml_path, ops, output_path):
+        """
+        Takes Resolve's NATIVE FCP7 XML export of a timeline and applies the
+        BadWords op-cuts to it, producing a new XML ready for import.
+
+        WHY THIS APPROACH:
+        Building XML from scratch (build_edit_xml_from_ops) skips any clip that
+        has no GetMediaPoolItem() — adjustment clips, generators, Fusion comps, etc.
+        By modifying Resolve's OWN export, ALL clip types are preserved because
+        Resolve already knows how to represent and re-import them.
+
+        ALGORITHM:
+        - ops is a sorted list of {'s': int, 'e': int, 'type': str} in 0-based frames.
+        - Each clipitem's <start>/<end> are absolute timeline frames (e.g. 216000-based).
+        - We subtract tl_start_frame to work in 0-based space, apply cuts, then write
+          destination positions starting from 0 (Resolve sets its own timecode on import).
+        - For each clipitem that overlaps with kept ops: emit one clipitem per op-overlap,
+          adjusting <in>/<out>/<start>/<end>/<duration> accordingly.
+        - Returns (success: bool, color_schedule: dict)
+          color_schedule maps dest_start_frame → color|None for reapply_clip_colors().
+        """
+        import xml.etree.ElementTree as ET
+        import copy
+
+        COLOR_MAP = {
+            "bad":          "Violet",
+            "repeat":       "Navy",
+            "typo":         "Olive",
+            "inaudible":    "Chocolate",
+            "silence_mark": "Tan",
+        }
+
+        try:
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+
+            # ── 1. Determine tl_start_frame from the first clipitem's <start> and op offset ──
+            # Resolve exports absolute frame numbers. ops use 0-based (relative) frames.
+            # We detect tl_start by finding the minimum <start> value across all clipitems
+            # and cross-checking with ops[0]['s']. If ops start at 0 and the minimum
+            # clipitem start is 216000, then tl_start_frame = 216000.
+            min_abs_start = None
+            for ci in root.iter('clipitem'):
+                s_el = ci.find('start')
+                if s_el is not None and s_el.text and s_el.text.strip() != '-1':
+                    try:
+                        v = int(s_el.text)
+                        if v >= 0 and (min_abs_start is None or v < min_abs_start):
+                            min_abs_start = v
+                    except ValueError:
+                        pass
+
+            tl_start_frame = min_abs_start if min_abs_start is not None else 0
+            log_info(f"apply_ops_cuts: tl_start_frame={tl_start_frame}, ops={len(ops)}")
+
+            # ── 2. Build dest_offset lookup: for a 0-based src frame, return dest frame ──
+            # Pre-build sorted ops list
+            sorted_ops = sorted(ops, key=lambda x: x['s'])
+            # Build cumulative dest offsets: dest_offset[i] = sum of durations of ops[0..i-1]
+            dest_offsets = []
+            acc = 0
+            for op in sorted_ops:
+                dest_offsets.append(acc)
+                acc += (op['e'] - op['s'])
+            total_dest_frames = acc
+
+            def src_to_dest(src_0based):
+                """Map a 0-based source frame to dest frame. Returns -1 if in a cut zone."""
+                for i, op in enumerate(sorted_ops):
+                    if op['s'] <= src_0based < op['e']:
+                        return dest_offsets[i] + (src_0based - op['s'])
+                return -1
+
+            def op_color_for_src(src_0based):
+                """Return the color string for the op containing src_0based, or None."""
+                for op in sorted_ops:
+                    if op['s'] <= src_0based < op['e']:
+                        c = COLOR_MAP.get(op['type'])
+                        if not c and str(op['type']).startswith('custom_'):
+                            c = op['type'].split('_')[1]
+                        return c
+                return None
+
+            # ── 3. Process all tracks ──────────────────────────────────────────────────────
+            color_schedule = {}  # dest_start → color|None
+
+            for track in root.iter('track'):
+                # Collect all clipitems in the track
+                original_items = list(track.findall('clipitem'))
+                # Remove them all — we'll re-add the cut versions
+                for ci in original_items:
+                    track.remove(ci)
+
+                ci_id_counter = [0]
+
+                for ci in original_items:
+                    # ── Skip compound clips (nested sequence references) ───────────
+                    # Resolve's FCP7 XML export for complex timelines (multiple clips,
+                    # adjustment clips, etc.) adds an extra <clipitem> that wraps the
+                    # ENTIRE source timeline as a compound clip/nested sequence.
+                    # These have a <sequence> child instead of a normal <file> element.
+                    # Including them in the output causes:
+                    #   • A duplicate timeline item appearing in the BadWords Media Pool bin
+                    #   • A large green nested-sequence clip on the assembled timeline
+                    #   • Silent/incorrect audio segments (compound clip has internal timing)
+                    # Fix: detect and skip any clipitem that contains a <sequence> child.
+                    if ci.find('sequence') is not None:
+                        continue
+
+                    s_el  = ci.find('start')
+                    e_el  = ci.find('end')
+                    in_el = ci.find('in')
+                    out_el = ci.find('out')
+
+                    if s_el is None or e_el is None:
+                        continue
+                    try:
+                        abs_s = int(s_el.text)
+                        abs_e = int(e_el.text)
+                    except (ValueError, TypeError):
+                        continue
+
+
+                    # Convert to 0-based
+                    src_s = abs_s - tl_start_frame
+                    src_e = abs_e - tl_start_frame
+                    orig_dur = src_e - src_s
+
+                    # Source in/out (media head offsets)
+                    try:    src_in  = int(in_el.text)  if in_el  is not None and in_el.text  else 0
+                    except: src_in  = 0
+                    try:    src_out = int(out_el.text) if out_el is not None and out_el.text else src_in + orig_dur
+                    except: src_out = src_in + orig_dur
+
+                    # Find all op-overlaps for this clipitem
+                    for i, op in enumerate(sorted_ops):
+                        overlap_s = max(src_s, op['s'])
+                        overlap_e = min(src_e, op['e'])
+                        if overlap_e <= overlap_s:
+                            continue
+
+                        # Position within source clip where this overlap starts
+                        clip_offset = overlap_s - src_s
+                        seg_dur     = overlap_e - overlap_s
+
+                        new_dest_s = dest_offsets[i] + (overlap_s - op['s'])
+                        new_dest_e = new_dest_s + seg_dur
+                        new_src_in  = src_in  + clip_offset
+                        new_src_out = new_src_in + seg_dur
+
+                        # Clone the clipitem for this segment
+                        new_ci = copy.deepcopy(ci)
+                        ci_id_counter[0] += 1
+                        new_ci.set('id', f"bw-ci-{ci_id_counter[0]}")
+
+                        # Patch start / end / duration / in / out
+                        def _set(el_name, val):
+                            el = new_ci.find(el_name)
+                            if el is None:
+                                el = ET.SubElement(new_ci, el_name)
+                            el.text = str(val)
+
+                        _set('start',    new_dest_s)
+                        _set('end',      new_dest_e)
+                        _set('duration', seg_dur)
+                        _set('in',       new_src_in)
+                        _set('out',      new_src_out)
+
+                        # ── Strip invalid file references ──────────────────────────────
+                        # Non-file-backed clips (adjustment clips, generators, etc.) have
+                        # a <pathurl> pointing to an internal Resolve resource that doesn't
+                        # exist as a normal filesystem file.  When importSourceClips:True is
+                        # used, Resolve tries to import every <file><pathurl> it finds —
+                        # if any pathurl is unresolvable, the ENTIRE ImportTimelineFromFile
+                        # returns None, causing offline media on all clips.
+                        # Fix: remove <file> from non-file-backed clips so Resolve skips
+                        # them during source-clip import but still creates the clip
+                        # structure from the clipitem's other attributes (start/end/duration).
+                        file_el = new_ci.find('file')
+                        if file_el is not None:
+                            pathurl_el = file_el.find('pathurl')
+                            if pathurl_el is not None and pathurl_el.text:
+                                raw = pathurl_el.text.strip()
+                                if raw.startswith('file://'):
+                                    import urllib.parse as _up
+                                    fs_path = _up.unquote(raw[len('file://'):])
+                                    # 'file:///home/...' → fs_path='/home/...' ✓
+                                    # 'file:///' on Windows gives '/C:/...' → normalise
+                                    if not os.path.exists(fs_path) and fs_path.startswith('/') \
+                                            and len(fs_path) > 2 and fs_path[2] == ':':
+                                        fs_path = fs_path[1:]  # Windows: strip leading /
+                                    if not os.path.exists(fs_path):
+                                        # Non-existent path → adjustment clip / generator
+                                        new_ci.remove(file_el)
+                                else:
+                                    # Non file:// scheme (resolve://, etc.) → strip
+                                    new_ci.remove(file_el)
+
+                        track.append(new_ci)
+
+                        # Record color for this dest position
+                        color_schedule[new_dest_s] = op_color_for_src(op['s'])
+
+
+            # ── 4. Patch sequence <duration> and <out> ─────────────────────────────────────
+            for seq in root.findall('.//sequence'):
+                def _patch(tag, val):
+                    el = seq.find(tag)
+                    if el is not None:
+                        el.text = str(val)
+                _patch('duration', total_dest_frames)
+                _patch('out',      total_dest_frames)
+                break
+
+            # ── 5. Write output XML ────────────────────────────────────────────────────────
+            raw = ET.tostring(root, encoding='unicode', xml_declaration=False)
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+                f.write(raw)
+
+            log_info(f"apply_ops_cuts: wrote {output_path} "
+                     f"(tl_start={tl_start_frame}, total_dest={total_dest_frames}f, "
+                     f"color_entries={len(color_schedule)})")
+            return True, color_schedule
+
+        except Exception as e:
+            import traceback
+            log_error(f"apply_ops_cuts_to_timeline_xml error: {e}\n{traceback.format_exc()}")
+            return False, {}
+
+
     def import_xml_as_timeline(self, xml_path, source_tl_name):
         """
         Imports a filtered FCP7 XML into Resolve as a new named timeline.
         - Timeline is named: '{source_tl_name} BadWords Filtered N'
-        - Timeline is moved to BadWords/Resources.
         - importSourceClips=True re-links existing media by file path.
         Returns the new timeline name (str) or None on failure.
         """
@@ -917,22 +1147,11 @@ class ResolveHandler:
             base_name, xml_idx = self.get_next_xml_index(source_tl_name)
             xml_tl_name = f"{base_name} BadWords Filtered {xml_idx}"
 
-            # Set current folder to Resources BEFORE importing so any source clips
-            # that Resolve creates as part of the import (duplicates of existing media)
-            # land in BadWords/Resources instead of Master or wherever was active.
-            _resources_bin = self.get_badwords_resources_bin()
-            if _resources_bin:
-                try:
-                    self.media_pool.SetCurrentFolder(_resources_bin)
-                except Exception:
-                    pass
-
+            # Source clips are already in the user's media pool (they came from
+            # the original timeline). We do NOT change the current folder — clips
+            # that Resolve touches will stay in their original location.
             import_options = {
                 "timelineName":      xml_tl_name,
-                # importSourceClips=True: required to re-link media when importing
-                # from XML. Without this, clips may appear as offline.
-                # The current folder is set to BadWords/Resources above so any
-                # newly created/duplicated source clips land there, not in Master.
                 "importSourceClips": True,
             }
             log_info(f"import_xml_as_timeline: importing as '{xml_tl_name}' from '{xml_path}'")
@@ -954,8 +1173,8 @@ class ResolveHandler:
             except Exception:
                 pass
 
-            # Move to BadWords/Resources
-            self.move_to_badwords_bin(name, "resources")
+            # NOTE: Filtered timeline intentionally left in its landing folder.
+            # No Resources bin is created — source clips stay where they are.
 
             return name
 
@@ -1011,26 +1230,34 @@ class ResolveHandler:
 
         if total_v_items == 1 and total_a_items <= 1:
             v_pool_item = v_clips_all[0].GetMediaPoolItem()
-            if total_a_items == 1:
+            # Adjustment clips, generators, etc. have no MediaPoolItem → fall to Condition B.
+            if v_pool_item is None:
+                log_info("Auto-Sourcing: V1 clip has no MediaPoolItem (adjustment/generator). "
+                         "Falling to Condition B.")
+            elif total_a_items == 1:
                 a_pool_item = a_clips_all[0].GetMediaPoolItem()
-                v_path = v_pool_item.GetClipProperty("File Path")
-                a_path = a_pool_item.GetClipProperty("File Path")
-                
-                # Warunek krytyczny: Upewnij się, że wideo i audio pochodzą z tego samego fizycznego pliku
-                # Zabezpiecza to przed błędami, gdy użytkownik ręcznie podłożył ścieżkę dźwiękową
-                if v_path and a_path and v_path == a_path:
-                    source_media_item = v_pool_item
-                    is_single_uncut = True
-                    context_type = 'video'
+                if a_pool_item is None:
+                    log_info("Auto-Sourcing: A1 clip has no MediaPoolItem. Falling to Condition B.")
+                else:
+                    v_path = v_pool_item.GetClipProperty("File Path")
+                    a_path = a_pool_item.GetClipProperty("File Path")
+
+                    # Warunek krytyczny: Upewnij się, że wideo i audio pochodzą z tego samego fizycznego pliku
+                    # Zabezpiecza to przed błędami, gdy użytkownik ręcznie podłożył ścieżkę dźwiękową
+                    if v_path and a_path and v_path == a_path:
+                        source_media_item = v_pool_item
+                        is_single_uncut = True
+                        context_type = 'video'
             else:
                 source_media_item = v_pool_item
                 is_single_uncut = True
                 context_type = 'video'
-                
+
         elif total_v_items == 0 and total_a_items == 1:
             source_media_item = a_clips_all[0].GetMediaPoolItem()
             is_single_uncut = True
             context_type = 'audio'
+
 
         # ZWRÓĆ WYNIK NA PODSTAWIE WARUNKÓW
         if is_single_uncut and source_media_item:
@@ -1319,12 +1546,24 @@ class ResolveHandler:
                 ET.SubElement(r, "ntsc").text = ntsc
                 return r
 
+            # Audio-only file extensions — used to emit correct <mediatype> in <file>
+            _AUDIO_EXTS = {
+                ".wav", ".mp3", ".aac", ".aiff", ".aif", ".flac",
+                ".m4a", ".ogg", ".opus", ".w64", ".caf",
+            }
+
             def make_file_elem(parent, path, emit_full):
                 """
                 Emits <file id="file-N"> with full content (first time),
                 or a self-closing reference <file id="file-N"/> (subsequent).
                 Includes <duration> = total source frames to prevent Freeze Time
                 when src_in > 0 (trimmed clips).
+
+                CRITICAL: <mediatype> MUST be emitted for audio-only source files
+                (e.g. .wav).  Without it, Resolve cannot determine the stream type
+                and marks every clip on the imported timeline as "media offline"
+                (red error).  For mixed-media files (video+audio) the element is
+                omitted — Resolve defaults to "video" which is correct.
                 """
                 fid = get_file_id(path)
                 file_el = ET.SubElement(parent, "file", id=fid)
@@ -1337,6 +1576,15 @@ class ResolveHandler:
                     tf = file_total_frames.get(path, 0)
                     if tf > 0:
                         ET.SubElement(file_el, "duration").text = str(tf)
+                    # Emit <mediatype> only for audio-only source files.
+                    # Resolve requires this to correctly link .wav/.mp3/etc. clips.
+                    # For video files (even those with embedded audio) the element
+                    # must be absent — Resolve then defaults to "video" correctly.
+                    ext = os.path.splitext(path)[1].lower()
+                    if ext in _AUDIO_EXTS:
+                        ET.SubElement(file_el, "mediatype").text = "audio"
+                        log_info(f"make_file_elem: audio-only source detected ({ext}), "
+                                 f"emitting <mediatype>audio</mediatype> for '{path.split('/')[-1]}'")
                 # else: empty element = reference only
 
             def make_clipitem(parent, ci_id, dest_start, dest_end,
@@ -1647,10 +1895,10 @@ class ResolveHandler:
         try:
             log_info(f"Creating timeline: {new_tl_name} (AudioOnly: {audio_only_mode})")
 
-            # Ensure new timeline lands in BadWords/Edits — pre-select that folder
-            edits_bin = self.get_badwords_edits_bin()
-            if edits_bin:
-                self.media_pool.SetCurrentFolder(edits_bin)
+            # Place new timeline directly in BadWords/ root bin (no Edits subfolder).
+            bw_bin = self.get_badwords_root_bin()
+            if bw_bin:
+                self.media_pool.SetCurrentFolder(bw_bin)
 
             new_tl = self.media_pool.CreateEmptyTimeline(new_tl_name)
             if not new_tl:
