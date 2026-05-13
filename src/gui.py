@@ -2444,7 +2444,7 @@ class FramelessWindowMixin:
                 )
             else:
                 # Popups are genuinely frameless — translucency is safe here.
-                self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.Dialog)
+                self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.Dialog | Qt.NoDropShadowWindowHint)
                 self.setAttribute(Qt.WA_TranslucentBackground, True)
         elif self._is_mac and self._is_root:
             # macOS root window: use native title bar with traffic lights.
@@ -2458,7 +2458,7 @@ class FramelessWindowMixin:
             )
         else:
             # Linux and macOS popups: fully frameless + translucent (rounded corners via QSS).
-            self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+            self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
             self.setAttribute(Qt.WA_TranslucentBackground, True)
 
         self._is_popup = is_popup
@@ -9123,7 +9123,7 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
 
         inner = QWidget()
         inner.setObjectName("welcome_inner")
-        inner.setFixedWidth(320)
+        inner.setFixedWidth(340)
         inner.setStyleSheet("QWidget#welcome_inner { background: transparent; }")
 
         inner_layout = QVBoxLayout(inner)
@@ -9172,7 +9172,7 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
         p_transcription = QWidget()
         p_transcription.setStyleSheet("background: transparent;")
         l_trans = QVBoxLayout(p_transcription)
-        l_trans.setContentsMargins(0, 0, 0, 0)
+        l_trans.setContentsMargins(10, 0, 10, 0)
         l_trans.setSpacing(0)
         l_trans.setAlignment(Qt.AlignTop)
 
@@ -9228,9 +9228,10 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
         lang_items = list(config.SUPPORTED_LANGUAGES.values())
         self._combo_lang = SearchableDropdown(lang_items)
         self._combo_lang.setFixedHeight(30)
-        saved_lang = prefs.get('lang', 'Auto')
+        saved_lang = prefs.get('lang', '')
         display_name = config.SUPPORTED_LANGUAGES.get(saved_lang, saved_lang)
-        self._combo_lang.setText(display_name if (display_name in lang_items or display_name == 'Auto') else "Auto")
+        placeholder = self.txt("lbl_choose_recording_language") if hasattr(self, 'txt') else "Choose recording language"
+        self._combo_lang.setText(display_name if display_name in lang_items else placeholder)
         self._combo_lang.valueChanged.connect(lambda v: self.engine.save_preferences({"lang": v}))
         l_trans.addLayout(_row(self.txt("lbl_lang"), self._combo_lang))
         l_trans.addSpacing(10)
@@ -9348,7 +9349,7 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
         p_fast = QWidget()
         p_fast.setStyleSheet("background: transparent;")
         l_fast = QVBoxLayout(p_fast)
-        l_fast.setContentsMargins(0, 0, 0, 0)
+        l_fast.setContentsMargins(10, 0, 10, 0)
         l_fast.setSpacing(0)
         l_fast.setAlignment(Qt.AlignTop)
 
@@ -9662,6 +9663,57 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
         self.go_to_page(1)
 
     def _on_start_analysis(self):
+        # ── Language validation ─────────────────────────────────────────────────
+        raw_lang_txt = self._combo_lang.text() if hasattr(self, '_combo_lang') else ''
+        _lang_is_valid = raw_lang_txt.strip() and raw_lang_txt in set(config.SUPPORTED_LANGUAGES.values())
+
+        if not _lang_is_valid:
+            # Flash red border on the language dropdown
+            if hasattr(self, '_combo_lang'):
+                _orig_ss = (
+                    f"QPushButton {{"
+                    f" background-color: #1e1e1e;"
+                    f" color: #d4d4d4;"
+                    f" text-align: left;"
+                    f" padding: 4px 8px;"
+                    f" border: 1px solid #3a3a3a;"
+                    f" border-radius: 3px;"
+                    f" min-height: 20px;"
+                    f"}}"
+                    f"QPushButton:hover {{ border-color: {config.BTN_BG}; }}"
+                )
+                _err_ss = (
+                    "QPushButton {"
+                    " background-color: #1e1e1e;"
+                    " color: #d4d4d4;"
+                    " text-align: left;"
+                    " padding: 4px 8px;"
+                    " border: 1px solid #ed4245;"
+                    " border-radius: 3px;"
+                    " min-height: 20px;"
+                    "}"
+                    "QPushButton:hover { border-color: #ed4245; }"
+                )
+                self._combo_lang.setStyleSheet(_err_ss)
+                
+                # Add a little shake animation
+                from PySide6.QtCore import QPropertyAnimation as _QPA, QPoint as _QP
+                anim = _QPA(self._combo_lang, b"pos", self)
+                anim.setDuration(300)
+                pos = self._combo_lang.pos()
+                anim.setKeyValueAt(0, pos)
+                anim.setKeyValueAt(0.2, pos + _QP(5, 0))
+                anim.setKeyValueAt(0.4, pos - _QP(5, 0))
+                anim.setKeyValueAt(0.6, pos + _QP(5, 0))
+                anim.setKeyValueAt(0.8, pos - _QP(5, 0))
+                anim.setKeyValueAt(1, pos)
+                anim.start()
+                self._lang_shake_anim = anim # keep ref
+                
+                from PySide6.QtCore import QTimer as _QT
+                _QT.singleShot(1250, lambda: self._combo_lang.setStyleSheet(_orig_ss))
+            return  # Do NOT start analysis
+
         # 1. Hide side panels
         if hasattr(self, '_panel_left'): self._panel_left.hide()
         if hasattr(self, '_panel_right'): self._panel_right.hide()
