@@ -1146,11 +1146,11 @@ class ResolveHandler:
             return False, {}
 
 
-    def import_xml_as_timeline(self, xml_path, source_tl_name):
+    def import_xml_as_timeline(self, xml_path, source_tl_name, audio_only_mode=False):
         """
         Imports a filtered FCP7 XML into Resolve as a new named timeline.
         - Timeline is named: '{source_tl_name} BadWords Filtered N'
-        - importSourceClips=True re-links existing media by file path.
+        - importSourceClips=True re-links existing media by file path (False for audio-only to preserve channels).
         Returns the new timeline name (str) or None on failure.
         """
         try:
@@ -1166,7 +1166,7 @@ class ResolveHandler:
             # that Resolve touches will stay in their original location.
             import_options = {
                 "timelineName":      xml_tl_name,
-                "importSourceClips": True,
+                "importSourceClips": not audio_only_mode,
             }
             log_info(f"import_xml_as_timeline: importing as '{xml_tl_name}' from '{xml_path}'")
             new_tl = self.media_pool.ImportTimelineFromFile(xml_path, import_options)

@@ -2213,9 +2213,19 @@ except Exception as e:
                         if root_folder:
                             self.resolve_handler.media_pool.SetCurrentFolder(root_folder)
 
+                        # FIX for MONO/Left-Channel bug on Audio-Only timelines:
+                        # When importSourceClips is True, Resolve often re-imports stereo .wav files
+                        # as dual mono and maps only the left channel based on FCP7 XML <trackindex>.
+                        # By setting it to False for Audio-Only, Resolve forces linking to the existing
+                        # Media Pool item, preserving the original stereo/multichannel layout perfectly.
+                        import_options = {
+                            "timelineName": new_tl_name,
+                            "importSourceClips": not audio_only_mode
+                        }
+
                         new_tl = self.resolve_handler.media_pool.ImportTimelineFromFile(
                             cut_xml_path,
-                            {"timelineName": new_tl_name, "importSourceClips": True},
+                            import_options,
                         )
 
 
@@ -2286,7 +2296,7 @@ except Exception as e:
                         if self.resolve_handler.export_timeline_xml(original_tl_name, raw_xml):
                             if self.resolve_handler.filter_xml_tracks(raw_xml, filtered_xml, track_indices):
                                 fl_name = self.resolve_handler.import_xml_as_timeline(
-                                    filtered_xml, original_tl_name
+                                    filtered_xml, original_tl_name, audio_only_mode=audio_only_mode
                                 )
                                 if fl_name:
                                     source_tl_for_fallback = fl_name
