@@ -911,7 +911,7 @@ class ResolveHandler:
             log_error(f"filter_xml_tracks error: {e}")
             return False
 
-    def apply_ops_cuts_to_timeline_xml(self, xml_path, ops, output_path):
+    def apply_ops_cuts_to_timeline_xml(self, xml_path, ops, output_path, audio_only_mode=False):
         """
         Takes Resolve's NATIVE FCP7 XML export of a timeline and applies the
         BadWords op-cuts to it, producing a new XML ready for import.
@@ -968,7 +968,17 @@ class ResolveHandler:
                         pass
 
             tl_start_frame = min_abs_start if min_abs_start is not None else 0
-            log_info(f"apply_ops_cuts: tl_start_frame={tl_start_frame}, ops={len(ops)}")
+            log_info(f"apply_ops_cuts: tl_start_frame={tl_start_frame}, ops={len(ops)}, audio_only_mode={audio_only_mode}")
+
+            # ── 1.5. Pre-scan for audio file IDs ──────────────────────────────────────────
+            audio_file_ids = set()
+            for file_el in root.iter('file'):
+                path_el = file_el.find('pathurl')
+                if path_el is not None and path_el.text:
+                    ext = os.path.splitext(path_el.text.strip())[1].lower()
+                    if ext in _AUDIO_EXTS:
+                        fid = file_el.get('id')
+                        if fid: audio_file_ids.add(fid)
 
             # ── 2. Build dest_offset lookup: for a 0-based src frame, return dest frame ──
             # Pre-build sorted ops list
@@ -1112,6 +1122,11 @@ class ResolveHandler:
                                         fs_path = fs_path[1:]  # Windows: strip leading /
                                     if not os.path.exists(fs_path):
                                         # Non-existent path → adjustment clip / generator
+                                        # We CANNOT strip the <file> element while keeping <clipitem> because FCP7 XML 
+                                        # requires video clipitems to have a file reference.
+                                        # But leaving resolve:// crashes importSourceClips:True.
+                                        # SOLUTION: Convert the <clipitem> to a <generatoritem> and remove <file>.
+                                        new_ci.tag = 'generatoritem'
                                         new_ci.remove(file_el)
                                     else:
                                         # Audio patch: if file is .wav/.mp3, ensure <mediatype>audio</mediatype> exists
@@ -1122,16 +1137,31 @@ class ResolveHandler:
                                             if mt_el is None:
                                                 ET.SubElement(file_el, 'mediatype').text = 'audio'
                                 else:
-                                    # Non file:// scheme (resolve://, etc.) → strip
+                                    # Non file:// scheme (resolve://, etc.)
+                                    new_ci.tag = 'generatoritem'
                                     new_ci.remove(file_el)
-                        
+                        is_audio_file = False
+                        f_el = new_ci.find('file')
+                        if f_el is not None:
+                            path_el = f_el.find('pathurl')
+                            if path_el is not None and path_el.text:
+                                ext = os.path.splitext(path_el.text.strip())[1].lower()
+                                if ext in _AUDIO_EXTS:
+                                    is_audio_file = True
+                            else:
+                                fid = f_el.get('id')
+                                if fid in audio_file_ids:
+                                    is_audio_file = True
+
                         # Fix for Mono/Left-channel bug on re-import:
-                        # Resolve sometimes forces stereo wav files to mono based on the <sourcetrack> element.
-                        # Removing <sourcetrack> from audio clips allows Resolve to default to the file's native channel map.
-                        for st_el in new_ci.findall('sourcetrack'):
-                            st_mt = st_el.find('mediatype')
-                            if st_mt is not None and st_mt.text == 'audio':
-                                new_ci.remove(st_el)
+                        # ONLY remove <trackindex> from <sourcetrack> if the clip points to a strictly audio file (.wav/.mp3).
+                        # Removing the whole <sourcetrack> causes Resolve to fail the XML import!
+                        # By removing just <trackindex>, we keep XML valid but prevent Resolve from forcing Mono Channel 1.
+                        if is_audio_file:
+                            for st_el in new_ci.findall('sourcetrack'):
+                                idx_el = st_el.find('trackindex')
+                                if idx_el is not None:
+                                    st_el.remove(idx_el)
 
                         track.append(new_ci)
 
@@ -1149,7 +1179,22 @@ class ResolveHandler:
                 _patch('out',      total_dest_frames)
                 break
 
-            # ── 5. Write output XML ────────────────────────────────────────────────────────
+            # ── 5. Inject dummy video block for pure audio timelines ───────────────────
+            # If the timeline was pure audio (like an .mp4 used only for audio), Resolve 
+            # exports NO <video> block. Re-importing this with importSourceClips:True 
+            # causes a fatal internal crash because Resolve expects a video block for .mp4.
+            if audio_only_mode:
+                for media_el in root.findall('.//media'):
+                    if media_el.find('video') is None:
+                        video_el = ET.Element('video')
+                        format_el = ET.SubElement(video_el, 'format')
+                        sc_el = ET.SubElement(format_el, 'samplecharacteristics')
+                        ET.SubElement(sc_el, 'width').text = '1920'
+                        ET.SubElement(sc_el, 'height').text = '1080'
+                        # Insert at the beginning of media_el
+                        media_el.insert(0, video_el)
+
+            # ── 6. Write output XML ────────────────────────────────────────────────────────
             raw = ET.tostring(root, encoding='unicode', xml_declaration=False)
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
@@ -1645,10 +1690,13 @@ class ResolveHandler:
                     ET.SubElement(li, "clipcolor").text = color
                 # Audio sourcetrack sub-element
                 if sourcetrack_type:
-                    st = ET.SubElement(ci, "sourcetrack")
-                    ET.SubElement(st, "mediatype").text = sourcetrack_type
-                    if sourcetrack_idx is not None:
-                        ET.SubElement(st, "trackindex").text = str(sourcetrack_idx)
+                    # Fix for Mono/Left-channel bug: do not emit sourcetrack for purely audio files
+                    ext = os.path.splitext(file_path)[1].lower()
+                    if ext not in _AUDIO_EXTS:
+                        st = ET.SubElement(ci, "sourcetrack")
+                        ET.SubElement(st, "mediatype").text = sourcetrack_type
+                        if sourcetrack_idx is not None:
+                            ET.SubElement(st, "trackindex").text = str(sourcetrack_idx)
                 # Record in color_schedule for reapply verification
                 color_schedule[dest_start] = color
                 return ci
