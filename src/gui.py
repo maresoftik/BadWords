@@ -1337,11 +1337,30 @@ class SearchOverlayWidget(QFrame):
             osdoc.log_error(f"Search positioning error: {str(e)}")
 
 
-class WorkerSignals(QObject):
+# FIX KR-03: Zastąpiono WorkerSignals bezpieczną klasą dziedziczącą po QThread
+class AnalysisWorker(QThread):
     progress = Signal(int)
     status = Signal(str)
-    finished = Signal(object, object)
+    finished_ok = Signal(object, object)
     error = Signal(str)
+
+    def __init__(self, engine, pipeline_func_name, settings):
+        super().__init__()
+        self.engine = engine
+        self.pipeline_func_name = pipeline_func_name
+        self.settings = settings
+
+    def run(self):
+        try:
+            func = getattr(self.engine, self.pipeline_func_name)
+            words_data, segments_data = func(
+                self.settings,
+                callback_status=self.status.emit,
+                callback_progress=self.progress.emit
+            )
+            self.finished_ok.emit(words_data, segments_data)
+        except Exception as e:
+            self.error.emit(str(e))
 
 class LiquidProgressBar(QWidget):
     def __init__(self, parent=None):
@@ -1430,18 +1449,17 @@ class LiquidProgressBar(QWidget):
 
 class UndoManager:
     def __init__(self, main_window, canvas):
+        from collections import deque
         self.main_window = main_window
         self.canvas = canvas
-        self.undo_stack = []
-        self.redo_stack = []
         self.max_size = 50
+        self.undo_stack = deque(maxlen=self.max_size)
+        self.redo_stack = deque(maxlen=self.max_size)
 
     def push(self, action):
         if not action or not action.get('changes'):
             return
         self.undo_stack.append(action)
-        if len(self.undo_stack) > self.max_size:
-            self.undo_stack.pop(0)
         self.redo_stack.clear()
 
     def undo(self):
@@ -4287,9 +4305,8 @@ class UpdateCheckThread(QThread):
     @staticmethod
     def _fetch_json(url: str, timeout: int = 8):
         import urllib.request, json, ssl
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
         req = urllib.request.Request(url, headers={"User-Agent": "BadWords-UpdateCheck/1.0"})
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             return json.loads(resp.read().decode('utf-8'))
@@ -4583,9 +4600,8 @@ class UpdateNotifyDialog(FramelessWindowMixin, QDialog):
             tmp_script = None
             try:
                 import urllib.request, ssl, sys, os
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode    = ssl.CERT_NONE
+                import certifi
+                ctx = ssl.create_default_context(cafile=certifi.where())
 
                 # Try primary (GitHub raw), then GitLab fallback
                 script_content = None
@@ -5528,9 +5544,8 @@ class SettingsDialog(FramelessWindowMixin, QDialog):
                     tmp = None
                     try:
                         import sys, os
-                        ctx = ssl.create_default_context()
-                        ctx.check_hostname = False
-                        ctx.verify_mode = ssl.CERT_NONE
+                        import certifi
+                        ctx = ssl.create_default_context(cafile=certifi.where())
                         content = None
                         for url in urls:
                             try:
@@ -8807,26 +8822,12 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
         }
         self._fs_settings = settings
 
-        self._worker_signals = WorkerSignals()
-        self._worker_signals.progress.connect(self._on_analysis_progress)
-        self._worker_signals.status.connect(self._on_analysis_status)
-        # Route to fast-silence-specific finished handler
-        self._worker_signals.finished.connect(self._on_fs_finished)
-        self._worker_signals.error.connect(self._on_analysis_error)
-
-        def worker_func():
-            try:
-                words_data, segments_data = self.engine.run_fast_silence_pipeline(
-                    settings,
-                    callback_status=self._worker_signals.status.emit,
-                    callback_progress=self._worker_signals.progress.emit
-                )
-                self._worker_signals.finished.emit(words_data, segments_data)
-            except Exception as e:
-                self._worker_signals.error.emit(str(e))
-
-        self._analysis_thread = threading.Thread(target=worker_func, daemon=True)
-        self._analysis_thread.start()
+        self._analysis_worker = AnalysisWorker(self.engine, 'run_fast_silence_pipeline', settings)
+        self._analysis_worker.progress.connect(self._on_analysis_progress)
+        self._analysis_worker.status.connect(self._on_analysis_status)
+        self._analysis_worker.finished_ok.connect(self._on_fs_finished)
+        self._analysis_worker.error.connect(self._on_analysis_error)
+        self._analysis_worker.start()
 
 
     def _on_fs_finished(self, words_data, segments_data):
@@ -8841,7 +8842,6 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
             return
 
         self.lbl_processing_status.setText(self.txt("txt_assembling_timeline"))
-        QApplication.processEvents()
 
         fs_prefs = self.engine.load_preferences() or {}
         fs_prefs['silence_cut']  = getattr(self, 'tgl_fs_cut',  None) and self.tgl_fs_cut.isChecked()
@@ -8849,18 +8849,52 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
         if hasattr(self, '_fs_settings'):
             fs_prefs['source_snapshot'] = self._fs_settings
 
-        success, warning, new_tl_name, clean_ops = self.engine.assemble_timeline(
-            words_data, fs_prefs,
-            callback_status=self.lbl_processing_status.setText,
-            callback_progress=self.bar_processing.set_value
-        )
+        # FIX KR-03: Asynchroniczny montaż osi czasu (Fast Silence) aby uniknąć GUI freeze
+        from PySide6.QtCore import QThread, Signal as _Signal, QObject
 
-        if success:
-            dlg = CustomMsgBox(self, self.txt("msg_standalone_silence"), self.txt("msg_standalone_silence_processing_c"), self.txt("btn_ok"))
-            dlg.exec()
-        else:
-            dlg = CustomMsgBox(self, self.txt("msg_fs_error"), f"{self.txt('msg_assembly_failed')}:\n{warning}", self.txt("btn_ok"))
-            dlg.exec()
+        class _FSAssemblySignals(QObject):
+            status = _Signal(str)
+            progress = _Signal(int)
+            finished = _Signal(object)
+
+        class _FSAssemblyThread(QThread):
+            def __init__(self, engine, words_data, prefs, sigs):
+                super().__init__()
+                self._engine = engine
+                self._data = words_data
+                self._prefs = prefs
+                self._sigs = sigs
+
+            def run(self):
+                try:
+                    result = self._engine.assemble_timeline(
+                        self._data,
+                        self._prefs,
+                        callback_status=self._sigs.status.emit,
+                        callback_progress=self._sigs.progress.emit
+                    )
+                except Exception as e:
+                    import osdoc
+                    osdoc.log_error(f"_FSAssemblyThread Error: {e}")
+                    result = (False, str(e), None, None)
+                self._sigs.finished.emit(result)
+
+        self._fs_sigs = _FSAssemblySignals()
+        self._fs_sigs.status.connect(self.lbl_processing_status.setText)
+        self._fs_sigs.progress.connect(self.bar_processing.set_value)
+
+        def on_fs_assembly_done(result):
+            success, warning, new_tl_name, clean_ops = result
+            if success:
+                dlg = CustomMsgBox(self, self.txt("msg_standalone_silence"), self.txt("msg_standalone_silence_processing_c"), self.txt("btn_ok"))
+                dlg.exec()
+            else:
+                dlg = CustomMsgBox(self, self.txt("msg_fs_error"), f"{self.txt('msg_assembly_failed')}:\n{warning}", self.txt("btn_ok"))
+                dlg.exec()
+
+        self._fs_sigs.finished.connect(on_fs_assembly_done)
+        self._fs_assembly_thread = _FSAssemblyThread(self.engine, words_data, fs_prefs, self._fs_sigs)
+        self._fs_assembly_thread.start()
 
         self.go_to_page(0)
         if hasattr(self, 'welcome_stack'):
@@ -8875,9 +8909,9 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
             # --- REMOVE favorite ---
             entry = self._favorite_proxies.pop(target_id)
             try: source_toggle.toggled.disconnect(entry['src_conn'])
-            except: pass
+            except Exception: pass
             try: entry['proxy'].toggled.disconnect(entry['prx_conn'])
-            except: pass
+            except Exception: pass
             proxy_row = entry['row_widget']
             self.layout_favorites.removeWidget(proxy_row)
             proxy_row.deleteLater()
@@ -9858,26 +9892,13 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
         }
 
         
-        # 4. Start thread targeting self.engine.run_analysis_pipeline()
-        self._worker_signals = WorkerSignals()
-        self._worker_signals.progress.connect(self._on_analysis_progress)
-        self._worker_signals.status.connect(self._on_analysis_status)
-        self._worker_signals.finished.connect(self._on_analysis_finished)
-        self._worker_signals.error.connect(self._on_analysis_error)
-        
-        def worker_func():
-            try:
-                words_data, segments_data = self.engine.run_analysis_pipeline(
-                    settings, 
-                    callback_status=self._worker_signals.status.emit, 
-                    callback_progress=self._worker_signals.progress.emit
-                )
-                self._worker_signals.finished.emit(words_data, segments_data)
-            except Exception as e:
-                self._worker_signals.error.emit(str(e))
-                
-        self._analysis_thread = threading.Thread(target=worker_func, daemon=True)
-        self._analysis_thread.start()
+        # 4. Start QThread targeting self.engine.run_analysis_pipeline()
+        self._analysis_worker = AnalysisWorker(self.engine, 'run_analysis_pipeline', settings)
+        self._analysis_worker.progress.connect(self._on_analysis_progress)
+        self._analysis_worker.status.connect(self._on_analysis_status)
+        self._analysis_worker.finished_ok.connect(self._on_analysis_finished)
+        self._analysis_worker.error.connect(self._on_analysis_error)
+        self._analysis_worker.start()
 
     def _on_analysis_progress(self, val):
         self._update_processing_progress(val)
@@ -9895,7 +9916,7 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
             _a = getattr(self, _aref, None)
             if _a is not None:
                 try: _a.stop()
-                except: pass
+                except Exception: pass
             setattr(self, _aref, None)
         if hasattr(self, 'lbl_first_run_hint'):
             self.lbl_first_run_hint.hide()
@@ -9913,7 +9934,7 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
             _a = getattr(self, _aref, None)
             if _a is not None:
                 try: _a.stop()
-                except: pass
+                except Exception: pass
             setattr(self, _aref, None)
         if hasattr(self, 'lbl_first_run_hint'):
             self.lbl_first_run_hint.hide()
@@ -10401,9 +10422,8 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
             tmp = None
             try:
                 import sys, os
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
+                import certifi
+                ctx = ssl.create_default_context(cafile=certifi.where())
                 content = None
                 for url in urls:
                     try:
