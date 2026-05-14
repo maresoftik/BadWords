@@ -2165,7 +2165,7 @@ except Exception as e:
             # We use Resolve's OWN FCP7 XML export as the base, then apply the
             # op-cuts to it. This preserves ALL clip types: regular video/audio,
             # adjustment clips, generators, Fusion comps, clips from other sources.
-            # importSourceClips:False tells Resolve to link to EXISTING pool items
+            # importSourceClips:True tells Resolve to link to EXISTING pool items
             # (the clips are already there from the user's original timeline),
             # preventing any source clip duplication or new folder creation.
             xml_success  = False
@@ -2191,19 +2191,13 @@ except Exception as e:
                 else:
                     # Step 2: Apply op-cuts to the exported XML
                     ok_cut, color_schedule = self.resolve_handler.apply_ops_cuts_to_timeline_xml(
-                        src_xml_path, clean_ops, cut_xml_path
+                        src_xml_path, clean_ops, cut_xml_path, audio_only_mode=audio_only_mode
                     )
 
                     if ok_cut:
                         set_status(self.txt("status_assembly_xml_import"))
                         set_progress(-1)
 
-                        # Import modified XML.
-                        # Non-file-backed clips (adjustment clips etc.) have had their
-                        # <file> elements stripped, so importSourceClips:True no longer
-                        # fails on them. File-backed clips (.wav, .mp4, etc.) retain their
-                        # <file><pathurl> and are correctly linked to existing pool items.
-                        
                         # CRITICAL: Reset current folder to Root before import.
                         # If a subfolder (like 'BadWords/') is currently active, Resolve
                         # might fail to link to existing clips in Master and instead
@@ -2213,6 +2207,8 @@ except Exception as e:
                         if root_folder:
                             self.resolve_handler.media_pool.SetCurrentFolder(root_folder)
 
+                        # Import modified XML.
+                        # We MUST use importSourceClips: True to prevent "Media Offline" for clips in sub-bins.
                         import_options = {
                             "timelineName": new_tl_name,
                             "importSourceClips": True
@@ -2291,7 +2287,7 @@ except Exception as e:
                         if self.resolve_handler.export_timeline_xml(original_tl_name, raw_xml):
                             if self.resolve_handler.filter_xml_tracks(raw_xml, filtered_xml, track_indices):
                                 fl_name = self.resolve_handler.import_xml_as_timeline(
-                                    filtered_xml, original_tl_name
+                                    filtered_xml, original_tl_name, audio_only_mode=audio_only_mode
                                 )
                                 if fl_name:
                                     source_tl_for_fallback = fl_name
