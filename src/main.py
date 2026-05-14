@@ -204,9 +204,8 @@ def _run_auto_update_if_needed(os_doc, splash=None):
     MAC_SCRIPT_GL = "https://gitlab.com/veritus-git/BadWords/-/raw/main/updaters/update-mac.sh"
 
     def _fetch_json(url):
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
         req = urllib.request.Request(url, headers={"User-Agent": "BadWords-AutoUpdate/1.0"})
         with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
             return json.loads(r.read().decode())
@@ -251,9 +250,8 @@ def _run_auto_update_if_needed(os_doc, splash=None):
         suffix = '.sh'
 
     # ── 3. Download update script ───────────────────────────────────────────
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    import certifi
+    ctx = ssl.create_default_context(cafile=certifi.where())
     content = None
     for url in urls:
         try:
@@ -303,12 +301,6 @@ def _run_auto_update_if_needed(os_doc, splash=None):
         os.execv(sys.executable, [sys.executable] + sys.argv)
     except Exception as e:
         osdoc.log_info(f"[AutoUpdate] Re-exec failed: {e}. Continuing with current files.")
-
-
-# ==========================================
-# MODULE-LEVEL REFERENCE (prevents GC)
-# ==========================================
-_controller: AppController = None
 
 
 # ==========================================

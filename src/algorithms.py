@@ -200,7 +200,8 @@ def simplified_metaphone(word):
     return s
 
 def calculate_similarity(s1, s2):
-    return difflib.SequenceMatcher(None, s1, s2).ratio()
+    # FIX IN-07: quick_ratio() jest 3-5x szybsze, a wystarcza do progowania fuzzy matchingu
+    return difflib.SequenceMatcher(None, s1, s2).quick_ratio()
 
 def check_fuzzy_match(s1, s2):
     """
@@ -386,7 +387,7 @@ class CompareEngineV5:
         i = 0 # Script index
         j = 0 # Trans index
         
-        print(f"--- STARTING COMPARE v6.7 (Script: {self.s_len}, Trans: {self.t_len}) ---")
+        log_info(f"--- STARTING COMPARE v6.7 (Script: {self.s_len}, Trans: {self.t_len}) ---")
 
         # -------------------------------------------------
         # PHASE -1: HEAD SYNC (PATCH v6.6)
@@ -413,7 +414,7 @@ class CompareEngineV5:
                     break
             
             if best_k > 0:
-                print(f"[Head Sync] Detected offset. Skipping first {best_k} script words (Title/Intro).")
+                log_info(f"[Head Sync] Detected offset. Skipping first {best_k} script words (Title/Intro).")
                 # Mark skipped words as missing
                 for skipped in range(best_k):
                     self.missing_script_indices.append(skipped)
@@ -622,7 +623,7 @@ class CompareEngineV5:
             self.missing_script_indices.append(i)
             i += 1
             
-        print("--- PHASE C FINISHED. STARTING PHASE D: SMART FRAGMENT FILL ---")
+        log_info("--- PHASE C FINISHED. STARTING PHASE D: SMART FRAGMENT FILL ---")
         self._phase_d_smart_fragment_fill()
         
         # --- PHASE E: COVERAGE VALIDATION (PATCH v6.7) ---
@@ -635,7 +636,7 @@ class CompareEngineV5:
                 real_missing.append(s_idx)
         
         self.missing_script_indices = real_missing
-        print(f"[Phase E] Coverage Validation complete. Final missing count: {len(self.missing_script_indices)}")
+        log_info(f"[Phase E] Coverage Validation complete. Final missing count: {len(self.missing_script_indices)}")
 
         # PATCH v6.4: ANTI-FREEZE HYBRID RETURN
         # Zamiast krotki, zwracamy listę (AnalysisResult), która ma atrybut .missing_indices.
@@ -662,7 +663,7 @@ class CompareEngineV5:
 
         sorted_script_indices = sorted(occurrences.keys())
 
-        print(f"[Phase D] Analyzing {len(sorted_script_indices)} unique script words...")
+        log_info(f"[Phase D] Analyzing {len(sorted_script_indices)} unique script words...")
 
         count_retakes = 0
         
@@ -698,7 +699,7 @@ class CompareEngineV5:
             self.mark_range(local_start, local_end, 'repeat')
             count_retakes += 1
 
-        print(f"--- PHASE D COMPLETED. Processed {count_retakes} genuine retake groups. ---")
+        log_info(f"--- PHASE D COMPLETED. Processed {count_retakes} genuine retake groups. ---")
 
 
 # ==========================================
@@ -718,7 +719,7 @@ def apply_debug_rgb_pattern(words_data):
     pattern = ['bad', 'typo', 'repeat']
     cycle_idx = 0
     
-    print("[DEBUG] Applying RGB Pattern to all words...")
+    log_info("[DEBUG] Applying RGB Pattern to all words...")
     
     for w in words_data:
         # Skip functional blocks
@@ -816,9 +817,9 @@ def absorb_inaudible_into_repeats(words_data):
     return words_data
 
 def analyze_repeats(words_data, show_inaudible=True, algo_settings=None):
+    """Legacy Standalone Analyzer (Without Script)."""
     if algo_settings is None:
         algo_settings = {}
-    """Legacy Standalone Analyzer (Without Script)."""
     # 1. Smart Reset - Wipeout omijający halucynacje, inaudible i ręczne poprawki
     for w in words_data:
         if w.get('_is_hallucination') or w.get('type') in ['silence', 'inaudible'] or w.get('is_inaudible'):
@@ -849,23 +850,30 @@ def analyze_repeats(words_data, show_inaudible=True, algo_settings=None):
     LOOKAHEAD = int(algo_settings.get('algo_retake_lookahead', 30))
     MIN_LEN = 2
     
+    # FIX OP-02: Mapowanie pozycji słów O(n) przed pętlą zamiast O(n²) nested loop
+    from collections import defaultdict
+    word_positions = defaultdict(list)
+    for idx_flow, entry in enumerate(linear_flow):
+        word_positions[entry['text']].append(idx_flow)
+        
     while i < n_flow:
         curr = linear_flow[i]
         limit = min(n_flow, i + LOOKAHEAD)
         best_len = 0
         best_target = -1
         
-        for j in range(i + 1, limit):
-            target = linear_flow[j]
-            if curr['text'] == target['text']:
-                k = 1
-                while (i + k < n_flow) and (j + k < n_flow):
-                    if linear_flow[i+k]['text'] == linear_flow[j+k]['text']: k += 1
-                    else: break
-                
-                if k >= MIN_LEN and k > best_len:
-                    best_len = k
-                    best_target = j
+        # Szybkie wyszukiwanie tylko tych indeksów, które mają to samo słowo
+        potential_targets = [idx for idx in word_positions[curr['text']] if i < idx < limit]
+        
+        for j in potential_targets:
+            k = 1
+            while (i + k < n_flow) and (j + k < n_flow):
+                if linear_flow[i+k]['text'] == linear_flow[j+k]['text']: k += 1
+                else: break
+            
+            if k >= MIN_LEN and k > best_len:
+                best_len = k
+                best_target = j
         
         if best_len >= MIN_LEN:
             for m in range(best_len):

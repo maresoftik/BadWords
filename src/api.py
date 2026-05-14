@@ -82,7 +82,9 @@ class ResolveHandler:
                     self.fps = self.timeline.GetSetting("timelineFrameRate")
                     # Handle string fps (e.g. "24.00")
                     try: self.fps = float(self.fps)
-                    except: self.fps = 24.0
+                    except (TypeError, ValueError) as e:
+                        log_error(f"_connect: failed to parse FPS '{self.fps}', falling back to 24.0: {e}")
+                        self.fps = 24.0
                     
                     log_info(f"Connected to Resolve. Project: {self.project.GetName()}, FPS: {self.fps}")
                 else:
@@ -101,8 +103,9 @@ class ResolveHandler:
         if not self.timeline: return 0  # Default to 0 instead of 3600*fps to act safe
         try:
             return int(self.timeline.GetStartFrame())
-        except:
-            return 86400 # Fallback 01:00:00:00 at 24fps
+        except Exception as e:
+            log_error(f"get_timeline_start_frame: {e}")
+            return 86400  # Fallback 01:00:00:00 at 24fps
 
     def jump_to_seconds(self, seconds):
         """Moves playhead to a specific second in the timeline."""
@@ -268,11 +271,13 @@ class ResolveHandler:
             # ── Unified render-status polling loop ────────────────────────────
             # GetRenderJobStatus is unreliable for live audio render progress.
             # It blocks the API thread and doesn't update fast enough.
-            # We revert to standard robust polling.
-            time.sleep(0.5)
+            # We revert to standard robust polling with shorter intervals.
+            time.sleep(0.1)
             
-            while self.project.IsRenderingInProgress():
-                time.sleep(1.0)
+            # Max 5 min timeout for audio render
+            deadline = time.time() + 300.0
+            while self.project.IsRenderingInProgress() and time.time() < deadline:
+                time.sleep(0.1)
                 
             status = self.project.GetRenderJobStatus(pid)
             self.project.DeleteRenderJob(pid)
@@ -319,7 +324,10 @@ class ResolveHandler:
             if self.resolve:
                 try:
                     self.resolve.OpenPage("edit")
-                    time.sleep(1.0)  # wait for Edit page to be fully active
+                    # Poll for page switch instead of fixed 1.0s wait
+                    deadline = time.time() + 2.0
+                    while self.resolve.GetCurrentPage() != "edit" and time.time() < deadline:
+                        time.sleep(0.1)
                 except Exception:
                     pass
 
@@ -445,7 +453,8 @@ class ResolveHandler:
                 try:
                     curr_idx = int(name.split(" BadWords Edit ")[-1])
                     if curr_idx >= idx: idx = curr_idx + 1
-                except: pass
+                except (ValueError, IndexError):
+                    pass  # nazwa nie zawiera poprawnego indeksu — pomijamy
         
         return base_name, idx
 
@@ -683,7 +692,8 @@ class ResolveHandler:
                 try:
                     curr_idx = int(name.split(" BadWords Filtered ")[-1])
                     if curr_idx >= idx: idx = curr_idx + 1
-                except: pass
+                except (ValueError, IndexError):
+                    pass  # nazwa nie zawiera poprawnego indeksu — pomijamy
         return base_name, idx
 
     # ── BadWords Bin Management ──────────────────────────────────────────────
@@ -756,8 +766,8 @@ class ResolveHandler:
         if self.media_pool and item:
             try:
                 self.media_pool.DeleteClips([item])
-            except:
-                pass
+            except Exception as e:
+                log_error(f"delete_item: DeleteClips failed: {e}")
 
     # ── XML Pre-filter Pipeline ─────────────────────────────────────────────
 
@@ -1031,9 +1041,13 @@ class ResolveHandler:
 
                     # Source in/out (media head offsets)
                     try:    src_in  = int(in_el.text)  if in_el  is not None and in_el.text  else 0
-                    except: src_in  = 0
+                    except (ValueError, AttributeError) as e:
+                        log_error(f"filter_xml_tracks: failed to parse src_in '{in_el.text if in_el is not None else None}': {e}")
+                        src_in  = 0
                     try:    src_out = int(out_el.text) if out_el is not None and out_el.text else src_in + orig_dur
-                    except: src_out = src_in + orig_dur
+                    except (ValueError, AttributeError) as e:
+                        log_error(f"filter_xml_tracks: failed to parse src_out '{out_el.text if out_el is not None else None}': {e}")
+                        src_out = src_in + orig_dur
 
                     # Find all op-overlaps for this clipitem
                     for i, op in enumerate(sorted_ops):
@@ -1952,7 +1966,7 @@ class ResolveHandler:
                 video_garbage = new_tl.GetItemListInTrack("video", 1) or []
                 if video_garbage:
                     try: new_tl.DeleteClips(video_garbage, False)
-                    except: log_error("Failed to delete video garbage clips.")
+                    except Exception as e: log_error(f"Failed to delete video garbage clips: {e}")
 
             # Apply Colors
             video_items = [] if audio_only_mode else (new_tl.GetItemListInTrack("video", 1) or [])
