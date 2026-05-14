@@ -942,6 +942,10 @@ class ResolveHandler:
             "inaudible":    "Chocolate",
             "silence_mark": "Tan",
         }
+        
+        _AUDIO_EXTS = {
+            '.wav', '.mp3', '.aac', '.m4a', '.flac', '.ogg', '.wma', '.aiff', '.aif'
+        }
 
         try:
             tree = ET.parse(xml_path)
@@ -1109,9 +1113,25 @@ class ResolveHandler:
                                     if not os.path.exists(fs_path):
                                         # Non-existent path → adjustment clip / generator
                                         new_ci.remove(file_el)
+                                    else:
+                                        # Audio patch: if file is .wav/.mp3, ensure <mediatype>audio</mediatype> exists
+                                        # Resolve exports omit this, causing Media Offline on re-import
+                                        ext = os.path.splitext(fs_path)[1].lower()
+                                        if ext in _AUDIO_EXTS:
+                                            mt_el = file_el.find('mediatype')
+                                            if mt_el is None:
+                                                ET.SubElement(file_el, 'mediatype').text = 'audio'
                                 else:
                                     # Non file:// scheme (resolve://, etc.) → strip
                                     new_ci.remove(file_el)
+                        
+                        # Fix for Mono/Left-channel bug on re-import:
+                        # Resolve sometimes forces stereo wav files to mono based on the <sourcetrack> element.
+                        # Removing <sourcetrack> from audio clips allows Resolve to default to the file's native channel map.
+                        for st_el in new_ci.findall('sourcetrack'):
+                            st_mt = st_el.find('mediatype')
+                            if st_mt is not None and st_mt.text == 'audio':
+                                new_ci.remove(st_el)
 
                         track.append(new_ci)
 
@@ -1146,11 +1166,11 @@ class ResolveHandler:
             return False, {}
 
 
-    def import_xml_as_timeline(self, xml_path, source_tl_name, audio_only_mode=False):
+    def import_xml_as_timeline(self, xml_path, source_tl_name):
         """
         Imports a filtered FCP7 XML into Resolve as a new named timeline.
         - Timeline is named: '{source_tl_name} BadWords Filtered N'
-        - importSourceClips=True re-links existing media by file path (False for audio-only to preserve channels).
+        - importSourceClips=True re-links existing media by file path.
         Returns the new timeline name (str) or None on failure.
         """
         try:
@@ -1166,7 +1186,7 @@ class ResolveHandler:
             # that Resolve touches will stay in their original location.
             import_options = {
                 "timelineName":      xml_tl_name,
-                "importSourceClips": not audio_only_mode,
+                "importSourceClips": True,
             }
             log_info(f"import_xml_as_timeline: importing as '{xml_tl_name}' from '{xml_path}'")
             new_tl = self.media_pool.ImportTimelineFromFile(xml_path, import_options)

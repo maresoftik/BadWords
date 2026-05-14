@@ -2460,15 +2460,6 @@ class FramelessWindowMixin:
                     | Qt.CustomizeWindowHint
                     | Qt.WindowMinMaxButtonsHint
                 )
-                try:
-                    import ctypes
-                    hwnd = int(self.winId())
-                    # DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE (-2)
-                    # Removes the semi-transparent 1px border that Windows 11 draws around the whole window
-                    color_none = ctypes.c_int(-2)
-                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(color_none), 4)
-                except Exception:
-                    pass
             else:
                 # Popups are genuinely frameless — translucency is safe here.
                 self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.Dialog | Qt.NoDropShadowWindowHint)
@@ -2517,6 +2508,17 @@ class FramelessWindowMixin:
 
     def showEvent(self, event):
         super().showEvent(event)
+        # Apply DWM border removal on Windows 11 after the window is fully created
+        if getattr(self, '_is_win', False):
+            try:
+                import ctypes
+                hwnd = int(self.winId())
+                if hwnd:
+                    # DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE
+                    color_none = ctypes.c_uint(0xFFFFFFFE)
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(color_none), 4)
+            except Exception:
+                pass
         # Wynosimy gripy na wierzch dopiero po zbudowaniu i wyrenderowaniu całego UI (CentralWidget)
         if hasattr(self, '_grips'):
             for grip in self._grips:
