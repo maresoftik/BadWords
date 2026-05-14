@@ -163,9 +163,8 @@ class AudioEngine:
                     req = urllib.request.Request(url, data=data, headers=headers)
                     
                     # OMINIECIE PROBLEMU Z BRAKIEM CERTYFIKATOW SSL W PORTABLE PYTHON
-                    ctx = ssl.create_default_context()
-                    ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
+                    import certifi
+                    ctx = ssl.create_default_context(cafile=certifi.where())
                     
                     with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
                         if response.getcode() == 200:
@@ -356,7 +355,8 @@ except Exception as e:
         finally:
             if os.path.exists(runner_path):
                 try: os.remove(runner_path)
-                except: pass
+                except Exception as e:
+                    log_error(f"download_whisper_model_interactive: cleanup failed: {e}")
 
 
 
@@ -723,7 +723,8 @@ except Exception as e:
         finally:
             if os.path.exists(runner_script_path):
                 try: os.remove(runner_script_path)
-                except: pass
+                except Exception as e:
+                    log_error(f"run_whisper: runner script cleanup failed: {e}")
 
     # ==========================================
     # 2. AUDIO PROCESSING (FFMPEG)
@@ -735,7 +736,9 @@ except Exception as e:
         Removed loudnorm (was raising noise floor and masking silence gaps).
         Using a very light compressor just to catch hard peaks, nothing more.
         """
-        norm_path = input_path.replace(".wav", "_norm.wav")
+        # FIX KR-04: użyj splitext zamiast replace() — bezpieczne dla .WAV i innych rozszerzeń
+        base, ext = os.path.splitext(input_path)
+        norm_path = base + "_norm" + ext
         filter_chain = (
             "highpass=f=80, "
             "acompressor=threshold=-15dB:ratio=2:attack=10:release=50"
@@ -746,7 +749,8 @@ except Exception as e:
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            check=True, **self.os_doc.get_subprocess_kwargs())
             return norm_path
-        except:
+        except Exception as e:
+            log_error(f"normalize_audio: FFmpeg failed, returning original: {e}")
             return input_path
     
     def create_slow_motion_audio(self, input_path, speed_factor):
@@ -891,7 +895,10 @@ except Exception as e:
     def _get_audio_duration(self, wav_path):
         """Return audio duration in seconds via ffprobe."""
         try:
-            ffprobe = self.ffmpeg_cmd.replace("ffmpeg", "ffprobe")
+            # FIX KR-05: nie używaj replace("ffmpeg","ffprobe") — ścieżka może zawierać "ffmpeg" wielokrotnie
+            _ffmpeg_dir = os.path.dirname(self.ffmpeg_cmd)
+            _ffprobe_name = "ffprobe" + (".exe" if self.os_doc.is_win else "")
+            ffprobe = os.path.join(_ffmpeg_dir, _ffprobe_name) if _ffmpeg_dir else _ffprobe_name
             cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration",
                    "-of", "default=noprint_wrappers=1:nokey=1", wav_path]
             res = subprocess.run(cmd, capture_output=True, text=True,
@@ -1181,10 +1188,12 @@ except Exception as e:
             for p in [normalized_wav, slow_wav, wav_path]:
                 if p and p != wav_path and os.path.exists(p):
                     try: os.remove(p)
-                    except: pass
+                    except Exception as e:
+                        log_error(f"run_fast_silence_pipeline cleanup: cannot remove {p}: {e}")
             if wav_path and os.path.exists(wav_path):
                 try: os.remove(wav_path)
-                except: pass
+                except Exception as e:
+                    log_error(f"run_fast_silence_pipeline cleanup: cannot remove wav: {e}")
 
 
     def run_analysis_pipeline(self, settings, callback_status=None, callback_progress=None):
@@ -1340,7 +1349,7 @@ except Exception as e:
             target_wav = normalized_wav
 
             update_progress(100)
-            time.sleep(0.3) # Let user see 100% completion of Phase 1
+            # FIX OP-03: Usunięto time.sleep(0.3) — logika UI nie należy do warstwy Engine
 
             update_status(self.txt("status_check_model"))
             
@@ -1382,7 +1391,8 @@ except Exception as e:
 
             # Execute Faster-Whisper via Runner with RESOLVED parameters
             # Chunked mode (Ultra Precise) activates only if requested and len(islands) > 1
-            ultra_precise_mode = self.os_doc.get_all_prefs().get('ai_ultra_precise', config.DEFAULT_SETTINGS.get('ai_ultra_precise', False))
+            # FIX DT-09: używamy saved_prefs załadowanego wcześniej — nie wywołujemy get_all_prefs() ponownie
+            ultra_precise_mode = saved_prefs.get('ai_ultra_precise', config.DEFAULT_SETTINGS.get('ai_ultra_precise', False))
             if not ultra_precise_mode:
                 islands = None
             
@@ -1406,10 +1416,12 @@ except Exception as e:
             # Cleanup
             for p in [wav_path, current_wav_path, normalized_wav]:
                 if p and os.path.exists(p) and p != wav_path:
-                     try: os.remove(p)
-                     except: pass
+                    try: os.remove(p)
+                    except Exception as e:
+                        log_error(f"run_analysis_pipeline cleanup: cannot remove {p}: {e}")
             try: os.remove(wav_path)
-            except: pass
+            except Exception as e:
+                log_error(f"run_analysis_pipeline cleanup: cannot remove wav: {e}")
 
             update_status(self.txt("status_process"))
             with open(json_path, 'r', encoding='utf-8') as f:
@@ -1463,7 +1475,8 @@ except Exception as e:
                 all_raw_words.append(w)
 
         if all_raw_words:
-            for n in range(1, 16):
+            # FIX OP-01: Zmniejszenie n-gram z 15 do 5 drastycznie redukuje złożoność
+            for n in range(1, 6):
                 i = 0
                 while i <= len(all_raw_words) - n * 2:
                     ngram = [clean_for_match(w['word']) for w in all_raw_words[i:i+n]]

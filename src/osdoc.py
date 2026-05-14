@@ -46,13 +46,14 @@ class ResolveStreamProxy:
             if txt and not txt.startswith("[INFO]") and not txt.startswith("[ERROR]") and "[STDOUT/ERR]" not in txt: 
                 self.log_func(f"[STDOUT/ERR] {txt}")
             self.stream.write(data)
-        except: 
-            pass 
+        except Exception:
+            pass  # StreamProxy: celowe wyciszenie błędów logowania (nie możemy logować błędu loggera)
     
     def flush(self):
         try:
             if hasattr(self.stream, 'flush'): self.stream.flush()
-        except: pass 
+        except Exception:
+            pass  # StreamProxy: flush może nie być obsługiwany przez wszystkie streamy
     
     def __getattr__(self, attr):
         return getattr(self.stream, attr)
@@ -60,12 +61,14 @@ class ResolveStreamProxy:
 def log_info(msg):
     logging.info(msg)
     try: print(f"[INFO] {msg}")
-    except: pass
+    except Exception:
+        pass  # log_info: wyciszamy tylko błędy wypisywania na konsolę (logowanie do pliku już się udało)
 
 def log_error(msg):
     logging.error(msg)
     try: print(f"[ERROR] {msg}", file=sys.__stderr__)
-    except: pass
+    except Exception:
+        pass  # log_error: wyciszamy tylko błędy wypisywania na konsolę (logowanie do pliku już się udało)
 
 # ==========================================
 # 2. OS DOCTOR CLASS
@@ -109,7 +112,8 @@ class OSDoctor:
             self.settings_file = os.path.join(self.app_data_dir, 'settings.json')
             self.legacy_pref_file = os.path.join(self.app_data_dir, 'pref.json')
             try: os.makedirs(self.app_data_dir, exist_ok=True)
-            except: pass
+            except Exception as e:
+                log_error(f"OSDoctor: nie można utworzyć katalogu fallback AppData: {e}")
 
         # Init Temp
         self.temp_dir = self._init_smart_temp_dir()
@@ -412,7 +416,8 @@ class OSDoctor:
             try:
                 os.makedirs(path, exist_ok=True)
                 return path
-            except:
+            except Exception as e:
+                log_error(f"_init_smart_temp_dir: nie można utworzyć katalogu temp {path}: {e}")
                 pass
         
         # Windows/Mac Default
@@ -503,7 +508,8 @@ class OSDoctor:
             # Verify execution permission on Linux and macOS
             if (self.is_linux or self.is_mac) and not os.access(portable_ffmpeg, os.X_OK):
                 try: os.chmod(portable_ffmpeg, 0o755)
-                except: pass
+                except Exception as e:
+                    log_error(f"get_ffmpeg_cmd: chmod failed on {portable_ffmpeg}: {e}")
             if self._test_executable(portable_ffmpeg):
                 log_info(f"[FFMPEG] Using Portable Binary: {portable_ffmpeg}")
                 return portable_ffmpeg
@@ -580,7 +586,8 @@ class OSDoctor:
             if os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
                 os.makedirs(self.temp_dir, exist_ok=True)
-        except: pass
+        except Exception as e:
+            log_error(f"cleanup_temp: nie można wyczyścić katalogu temp {self.temp_dir}: {e}")
 
     # ==========================
     # VENV & DEPENDENCY CHECKING
@@ -624,7 +631,8 @@ class OSDoctor:
         
         if self.is_win:
             try: import faster_whisper; fw_found = True # type: ignore
-            except: pass
+            except Exception as e:
+                log_error(f"check_dependencies: błąd importu faster_whisper: {e}")
         else:
             # Check VENV content
             venv_lib = os.path.join(self.install_dir, "venv", "lib")
