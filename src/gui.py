@@ -2460,6 +2460,15 @@ class FramelessWindowMixin:
                     | Qt.CustomizeWindowHint
                     | Qt.WindowMinMaxButtonsHint
                 )
+                try:
+                    import ctypes
+                    hwnd = int(self.winId())
+                    # DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE (-2)
+                    # Removes the semi-transparent 1px border that Windows 11 draws around the whole window
+                    color_none = ctypes.c_int(-2)
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(color_none), 4)
+                except Exception:
+                    pass
             else:
                 # Popups are genuinely frameless — translucency is safe here.
                 self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.Dialog | Qt.NoDropShadowWindowHint)
@@ -7866,8 +7875,8 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
         # Reusable style for compact silence param inputs
         _sil_input_style = (
             "QLineEdit { background: #1e1e1e; color: #d4d4d4; border: 1px solid #3a3a3a; "
-            "border-radius: 3px; padding: 2px 6px; } "
-            "QLineEdit:focus { border: 1px solid #1a7a3e; }"
+            "border-radius: 3px; padding: 2px 6px; outline: none; } "
+            "QLineEdit:focus { border: 1px solid #1a7a3e; outline: none; }"
         )
         _sil_rst_style = (
             "QPushButton { background: transparent; border: 1px solid #444; "
@@ -9442,8 +9451,9 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
                 background-color: #1e1e1e; color: #d4d4d4; 
                 border: 1px solid #3a3a3a; border-radius: 3px; 
                 padding: 4px 8px;
+                outline: none;
             }
-            QLineEdit:focus { border: 1px solid #1a7a3e; }
+            QLineEdit:focus { border: 1px solid #1a7a3e; outline: none; }
         '''
 
         # Helper: label above input + reset button on the right in one combined layout
