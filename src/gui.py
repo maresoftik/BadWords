@@ -2464,6 +2464,7 @@ class FramelessWindowMixin:
                 # Popups are genuinely frameless — translucency is safe here.
                 self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.Dialog | Qt.NoDropShadowWindowHint)
                 self.setAttribute(Qt.WA_TranslucentBackground, True)
+                self.setAttribute(Qt.WA_NoSystemBackground, True)
         elif self._is_mac and self._is_root:
             # macOS root window: use native title bar with traffic lights.
             # This gives us the green fullscreen button which hides Dock + Menu Bar.
@@ -2514,9 +2515,16 @@ class FramelessWindowMixin:
                 import ctypes
                 hwnd = int(self.winId())
                 if hwnd:
-                    # DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE
-                    color_none = ctypes.c_uint(0xFFFFFFFE)
-                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(color_none), 4)
+                    if getattr(self, '_is_root', False):
+                        # Root: DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE
+                        color_none = ctypes.c_uint(0xFFFFFFFE)
+                        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(color_none), 4)
+                    else:
+                        # Popups: DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_DONOTROUND = 1
+                        # Wyłącza to systemową ramkę DWM (1px) rysowaną na granicy całkowitego
+                        # wymiaru okna (zatem poza cieniem), a także usuwa 'ghosting' z translucent UI.
+                        corner_pref = ctypes.c_int(1)
+                        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_pref), 4)
             except Exception:
                 pass
         # Wynosimy gripy na wierzch dopiero po zbudowaniu i wyrenderowaniu całego UI (CentralWidget)
