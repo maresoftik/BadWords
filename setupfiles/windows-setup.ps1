@@ -3,7 +3,7 @@
 #  Run with: irm https://raw.githubusercontent.com/veritus-git/BadWords/main/setupfiles/install-windows.ps1 | iex
 #
 #  Sole purpose: prepare Python environment and launch setup.py
-#  Supports boot-time caching — subsequent runs within the same
+#  Supports boot-time caching - subsequent runs within the same
 #  Windows session launch instantly from the persistent cache.
 # ============================================================
 
@@ -12,7 +12,7 @@ $ErrorActionPreference = "Continue"
 $INSTALLER_URL    = "https://raw.githubusercontent.com/veritus-git/BadWords/main/setupfiles/setup.py"
 $INSTALLER_URL_FB = "https://gitlab.com/badwords/BadWords/-/raw/main/setupfiles/setup.py"
 
-# ── Local File Detection ──────────────────────────────────────
+# -- Local File Detection --------------------------------------
 $ScriptDir = ""
 if ($MyInvocation.MyCommand.Path) {
     $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -20,7 +20,7 @@ if ($MyInvocation.MyCommand.Path) {
 $LocalSetup = if ($ScriptDir) { Join-Path $ScriptDir "setup.py" } else { "" }
 $LocalRepo  = if ($ScriptDir) { Split-Path -Parent $ScriptDir } else { "" }
 
-# ── Persistent cache directory ────────────────────────────────
+# -- Persistent cache directory --------------------------------
 # Everything here survives between bootstrapper runs but is
 # invalidated automatically when Windows reboots (boot-time marker).
 $CacheDir     = Join-Path $env:LOCALAPPDATA "BadWords-bootstrap"
@@ -33,13 +33,13 @@ $EmbedPyExe   = Join-Path $EmbedPyDir "python.exe"
 $EMBED_URL  = "https://www.python.org/ftp/python/3.12.9/python-3.12.9-embed-amd64.zip"
 $GETPIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 
-# ── Colors ────────────────────────────────────────────────────
+# -- Colors ----------------------------------------------------
 function step($m) { Write-Host "[>] $m" -ForegroundColor Cyan }
 function ok($m)   { Write-Host "[OK] $m" -ForegroundColor Green }
 function warn($m) { Write-Host "[!]  $m" -ForegroundColor Yellow }
 function die($m)  { Write-Host "[X]  $m" -ForegroundColor Red; Read-Host "Press Enter to close"; exit 1 }
 
-# ── Helper: launch CMD and exit PS1 immediately ───────────────
+# -- Helper: launch CMD and exit PS1 immediately ---------------
 function Launch-Installer($PyExe, $InstallPy, $ExtraPythonPath) {
     $PyArg = "`"$InstallPy`" --platform windows --bootstrap-python `"$PyExe`""
     if ($LocalRepo -and (Test-Path $LocalSetup)) {
@@ -53,11 +53,11 @@ function Launch-Installer($PyExe, $InstallPy, $ExtraPythonPath) {
     Start-Process -FilePath "cmd.exe" `
         -ArgumentList "/c title BadWords Setup && $CmdLine" `
         -WindowStyle Normal
-    # PS1 is no longer needed — close immediately
+    # PS1 is no longer needed - close immediately
     exit 0
 }
 
-# ── Session marker: file in $env:TEMP (cleared on reboot) ───
+# -- Session marker: file in $env:TEMP (cleared on reboot) ---
 # Much more reliable than Get-CimInstance which needs admin/WMI.
 $SessionFile = Join-Path $env:TEMP "bw_bootstrap_session.txt"
 $BootTime = "unknown"
@@ -68,7 +68,7 @@ try {
     $BootTime = "$($env:COMPUTERNAME)_$($env:USERNAME)"
 }
 
-# ── FAST PATH: Check boot-time cache ─────────────────────────
+# -- FAST PATH: Check boot-time cache -------------------------
 # We use TWO checks: (1) the session temp-file AND (2) the boot-time marker.
 # This handles both normal and fallback boot-time detection.
 $TempFileOk    = Test-Path $SessionFile
@@ -82,7 +82,7 @@ if ($TempFileOk -and $CacheFilesOk) {
     if ($bootOk) {
         Write-Host ""
         Write-Host "  BadWords Setup" -ForegroundColor White
-        Write-Host "  Cached environment found — refreshing installer script..." -ForegroundColor DarkGray
+        Write-Host "  Cached environment found - refreshing installer script..." -ForegroundColor DarkGray
 
         # Venv is cached (saves ~30s) but setup.py is always refreshed
         # so the user always runs the latest version of the installer.
@@ -104,7 +104,7 @@ if ($TempFileOk -and $CacheFilesOk) {
             } catch {}
         }
         if (-not $refreshOk) {
-            warn "Could not refresh setup.py — launching from cached copy."
+            warn "Could not refresh setup.py - launching from cached copy."
         }
 
         Write-Host "  Launching instantly (cached environment)..." -ForegroundColor DarkGray
@@ -113,7 +113,7 @@ if ($TempFileOk -and $CacheFilesOk) {
     }
 }
 
-# ── SLOW PATH: Full setup ─────────────────────────────────────
+# -- SLOW PATH: Full setup -------------------------------------
 Write-Host ""
 Write-Host "  BadWords Windows Bootstrapper" -ForegroundColor White
 Write-Host "  Preparing environment..." -ForegroundColor DarkGray
@@ -128,7 +128,7 @@ New-Item -ItemType Directory -Path $BW_TMP -Force | Out-Null
 
 try {
 
-# ── 1. Find system Python 3.10+ ───────────────────────────────
+# -- 1. Find system Python 3.10+ -------------------------------
 step "Looking for compatible Python (3.10+)..."
 $PythonExe = $null
 $VenvOk    = $false
@@ -145,7 +145,7 @@ foreach ($cmd in @("py", "python", "python3")) {
     } catch {}
 }
 
-# ── 2. Test venv support ──────────────────────────────────────
+# -- 2. Test venv support --------------------------------------
 if ($PythonExe) {
     $testVenv = Join-Path $BW_TMP "test_venv"
     try {
@@ -157,7 +157,7 @@ if ($PythonExe) {
     } catch { warn "venv test failed." }
 }
 
-# ── 3. Embedded Python fallback ───────────────────────────────
+# -- 3. Embedded Python fallback -------------------------------
 if (-not $PythonExe -or -not $VenvOk) {
     if (Test-Path $EmbedPyExe) {
         try {
@@ -205,8 +205,8 @@ if (-not $PythonExe -or -not $VenvOk) {
 
 if (-not $PythonExe) { die "No suitable Python found. Install Python 3.10+ from https://python.org" }
 
-# ── 4. Create bootstrap venv in cache (permanent) ─────────────
-# Venv lives in $CacheDir\venv — persists for the session
+# -- 4. Create bootstrap venv in cache (permanent) -------------
+# Venv lives in $CacheDir\venv - persists for the session
 step "Creating bootstrap environment..."
 $BootstrapVenv = Join-Path $CacheDir "venv"
 $BootstrapPy   = $null
@@ -231,7 +231,7 @@ try {
     $BootstrapPy = $PythonExe
 }
 
-# ── 5. Install rich into venv ─────────────────────────────────
+# -- 5. Install rich into venv ---------------------------------
 step "Installing dependencies (rich)..."
 $ExtraPythonPath = $null
 
@@ -254,7 +254,7 @@ if ($UseTargetFallback) {
 
 ok "Dependencies ready."
 
-# ── 6. Download setup.py into cache ────────────────────────
+# -- 6. Download setup.py into cache ------------------------
 step "Downloading BadWords installer..."
 $downloaded = $false
 
@@ -281,13 +281,13 @@ if (-not $downloaded) {
 if (-not $downloaded) { die "Failed to download setup.py from both GitHub and GitLab." }
 ok "Installer ready."
 
-# ── 7. Write cache markers ────────────────────────────────────
+# -- 7. Write cache markers ------------------------------------
 $BootTime | Set-Content -Path $CacheMarker -Encoding UTF8
 # Session temp-file: presence = same boot session
 "1" | Set-Content -Path $SessionFile -Encoding UTF8
 ok "Cache ready."
 
-# ── 8. Launch installer in CMD and exit PS1 immediately ───────
+# -- 8. Launch installer in CMD and exit PS1 immediately -------
 Write-Host ""
 Write-Host "  Launching BadWords Installer..." -ForegroundColor Cyan
 Write-Host ""
@@ -295,7 +295,7 @@ Write-Host ""
 Launch-Installer $BootstrapPy $CacheInstall $ExtraPythonPath
 
 } finally {
-    # BW_TMP only holds throw-away files — safe to delete immediately
+    # BW_TMP only holds throw-away files - safe to delete immediately
     if (Test-Path $BW_TMP) {
         Remove-Item -Path $BW_TMP -Recurse -Force -ErrorAction SilentlyContinue
     }
