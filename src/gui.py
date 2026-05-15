@@ -2508,22 +2508,18 @@ class FramelessWindowMixin:
 
     def showEvent(self, event):
         super().showEvent(event)
-        # Apply DWM border removal on Windows 11 after the window is fully created
+        # Apply DWM border removal on Windows 11 ONLY for popup windows to fix translucent background bugs.
+        # We do NOT touch the root window because it breaks native NC hit-testing (Aero Snap/Drag).
         if getattr(self, '_is_win', False):
             try:
                 import ctypes
                 hwnd = int(self.winId())
-                if hwnd:
-                    # DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE (zawsze dla Win11)
-                    color_none = ctypes.c_uint(0xFFFFFFFE)
-                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(color_none), 4)
-
-                    if not getattr(self, '_is_root', False):
-                        # Popupy: DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_DONOTROUND = 1
-                        # Wyłącza to systemową ramkę DWM (1px) rysowaną na granicy całkowitego
-                        # wymiaru okna (zatem poza cieniem), a także usuwa 'ghosting' z translucent UI.
-                        corner_pref = ctypes.c_int(1)
-                        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_pref), 4)
+                if hwnd and not getattr(self, '_is_root', False):
+                    # Popups: DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_DONOTROUND = 1
+                    # Wyłącza to systemową ramkę DWM (1px) rysowaną na granicy całkowitego
+                    # wymiaru okna (zatem poza cieniem), a także usuwa 'ghosting' z translucent UI.
+                    corner_pref = ctypes.c_int(1)
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_pref), 4)
             except Exception:
                 pass
         # Wynosimy gripy na wierzch dopiero po zbudowaniu i wyrenderowaniu całego UI (CentralWidget)
