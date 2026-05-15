@@ -1115,6 +1115,8 @@ class ResolveHandler:
                                 if raw.startswith('file://'):
                                     import urllib.parse as _up
                                     fs_path = _up.unquote(raw[len('file://'):])
+                                    if fs_path.startswith('localhost/'):
+                                        fs_path = fs_path[len('localhost'):]
                                     # 'file:///home/...' → fs_path='/home/...' ✓
                                     # 'file:///' on Windows gives '/C:/...' → normalise
                                     if not os.path.exists(fs_path) and fs_path.startswith('/') \

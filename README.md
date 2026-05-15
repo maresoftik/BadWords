@@ -129,7 +129,12 @@ Don't like pasting terminal commands? I completely understand! You can run the s
 1. Go to the [Releases page](https://github.com/veritus-git/BadWords/releases/latest) and download the Source Code `.zip`.
 2. Extract the folder somewhere on your drive.
 3. Open the `setupfiles` folder inside the extracted directory.
-4. Run the setup script dedicated to your OS.
+4. Run the setup script dedicated to your OS:
+  * **macOS / Linux**: Run the `.sh` script from the terminal.
+  * **Windows**: Open PowerShell/CMD in the folder *setupfiles* and run:
+    ```
+    powershell -ExecutionPolicy Bypass -File .\windows-setup.ps1
+    ```
 
 ---
 
