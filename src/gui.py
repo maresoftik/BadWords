@@ -2721,14 +2721,6 @@ class FramelessWindowMixin:
             if 0 <= pos.y() < tb_height:
                 child = self.childAt(pos)
 
-                # HTMAXBUTTON → Win11 Snap Layout flyout na hover.
-                # Windows obsługuje klik natywnie (SC_MAXIMIZE/SC_RESTORE).
-                if _tb and hasattr(_tb, 'btn_max') and not _tb.btn_max.isHidden():
-                    btn = _tb.btn_max
-                    btn_tl = btn.mapTo(self, QPoint(0, 0))
-                    if QRect(btn_tl, btn.size()).contains(pos):
-                        return True, 9  # HTMAXBUTTON
-
                 if not child or not child.inherits("QPushButton"):
                     return True, 2  # HTCAPTION
 
