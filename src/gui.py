@@ -2452,14 +2452,11 @@ class FramelessWindowMixin:
 
         if self._is_win:
             if self._is_root:
-                # Root window: uses a native HWND frame so DWM can handle Aero Snap,
-                # shadows, and the snap-layout preview.
-                self.setWindowFlags(
-                    self.windowFlags()
-                    | Qt.Window
-                    | Qt.CustomizeWindowHint
-                    | Qt.WindowMinMaxButtonsHint
-                )
+                # Root window: FramelessWindowHint eliminuje CAŁĄ NC area — DWM nie
+                # rysuje żadnych system buttonów (koniec z "Win98 button" artefaktem).
+                # Shadow i animacje odzyskujemy przez SetWindowLong(WS_THICKFRAME|WS_CAPTION)
+                # w showEvent + DwmExtendFrameIntoClientArea.
+                self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
             else:
                 # Popups are genuinely frameless — translucency is safe here.
                 self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.Dialog | Qt.NoDropShadowWindowHint)
@@ -2491,38 +2488,90 @@ class FramelessWindowMixin:
     def changeEvent(self, event):
         from PySide6.QtCore import QEvent
         if event.type() == QEvent.Type.WindowStateChange:
-            self._refresh_max_state()
-            # Gdy okno zmienia stan (max ↔ normal), wymuszamy na DWM natychmiastowe
-            # przeliczenie metryki NC przez SWP_FRAMECHANGED — eliminuje to białą ramkę
-            # która mogłaby się pojawić w pierwszej klatce po zmianie stanu.
+            was_max = getattr(self, '_was_maximized', False)
+            now_max = self.isMaximized()
+
             if getattr(self, '_is_win', False) and getattr(self, '_is_root', False):
                 try:
                     import ctypes
                     hwnd = int(self.winId())
                     if hwnd:
-                        # SWP_FRAMECHANGED(0x20)|SWP_NOZORDER(0x04)|SWP_NOMOVE(0x02)|SWP_NOSIZE(0x01)
+                        if was_max and not now_max:
+                            # max→normal: DWM ma stary bufor (full-size) i renderuje go
+                            # w mniejszym oknie → biały flash. DWMWA_CLOAK(13) ukrywa
+                            # okno w DWM na czas przejścia.
+                            val = ctypes.c_int(1)
+                            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 13, ctypes.byref(val), 4)
                         ctypes.windll.user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0027)
+                        if was_max and not now_max:
+                            from PySide6.QtCore import QTimer
+                            QTimer.singleShot(30, self._dwm_uncloak)
                 except Exception:
                     pass
+
+            self._was_maximized = now_max
+            self._refresh_max_state()
         super().changeEvent(event)
+
+    def _dwm_uncloak(self):
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            if hwnd:
+                val = ctypes.c_int(0)
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 13, ctypes.byref(val), 4)
+        except Exception:
+            pass
 
     def showEvent(self, event):
         super().showEvent(event)
-        # Apply DWM border removal on Windows 11 ONLY for popup windows to fix translucent background bugs.
-        # We do NOT touch the root window because it breaks native NC hit-testing (Aero Snap/Drag).
         if getattr(self, '_is_win', False):
             try:
                 import ctypes
                 hwnd = int(self.winId())
-                if hwnd and not getattr(self, '_is_root', False):
-                    # Popups: DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_DONOTROUND = 1
-                    # Wyłącza to systemową ramkę DWM (1px) rysowaną na granicy całkowitego
-                    # wymiaru okna (zatem poza cieniem), a także usuwa 'ghosting' z translucent UI.
+                if hwnd and getattr(self, '_is_root', False):
+                    user32 = ctypes.windll.user32
+                    dwmapi = ctypes.windll.dwmapi
+
+                    # 1. Przywróć style okna które FramelessWindowHint usunął:
+                    #    WS_THICKFRAME → DWM shadow + resize
+                    #    WS_CAPTION    → DWM animacje (minimize/restore)
+                    #    WS_MIN/MAXIMIZEBOX → systemowe min/max zachowanie
+                    #    WM_NCCALCSIZE=0 gwarantuje że NC area ma 0px —
+                    #    style mówią DWM "to okno MA frame" ale NCCALCSIZE
+                    #    mówi "frame ma 0 pikseli" → shadow bez artefaktów.
+                    GWL_STYLE = -16
+                    style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+                    style |= 0x00040000  # WS_THICKFRAME
+                    style |= 0x00C00000  # WS_CAPTION
+                    style |= 0x00020000  # WS_MINIMIZEBOX
+                    style |= 0x00010000  # WS_MAXIMIZEBOX
+                    user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+
+                    # 2. Wymuszenie renderowania NC przez DWM (shadow)
+                    # DWMWA_NCRENDERING_POLICY=2, DWMNCRP_ENABLED=2
+                    nc_policy = ctypes.c_int(2)
+                    dwmapi.DwmSetWindowAttribute(hwnd, 2, ctypes.byref(nc_policy), 4)
+
+                    # 3. DwmExtendFrameIntoClientArea: 1px top — DWM frame strip
+                    #    dla Aero Snap preview i systemowego shadow anchoring.
+                    class MARGINS(ctypes.Structure):
+                        _fields_ = [('left', ctypes.c_int), ('right', ctypes.c_int),
+                                     ('top',  ctypes.c_int), ('bottom', ctypes.c_int)]
+                    margins = MARGINS(0, 0, 1, 0)
+                    dwmapi.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(margins))
+
+                    # 4. Flush — DWM musi przetworzyć nowe style
+                    user32.SetWindowPos(
+                        hwnd, None, 0, 0, 0, 0,
+                        0x0001 | 0x0002 | 0x0004 | 0x0020  # NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED
+                    )
+                elif hwnd and not getattr(self, '_is_root', False):
+                    # Popupy: DWMWCP_DONOTROUND
                     corner_pref = ctypes.c_int(1)
                     ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_pref), 4)
             except Exception:
                 pass
-        # Wynosimy gripy na wierzch dopiero po zbudowaniu i wyrenderowaniu całego UI (CentralWidget)
         if hasattr(self, '_grips'):
             for grip in self._grips:
                 grip.raise_()
@@ -2535,19 +2584,7 @@ class FramelessWindowMixin:
         if title_bar and hasattr(title_bar, 'update_maximize_icon'):
             title_bar.update_maximize_icon(is_max)
 
-        # Gdy okno pokrywa cały ekran, border-radius: 12px powoduje wizualne
-        # "przycinanie" narożników. Zerujemy promień przy maksymalizacji i
-        # przywracamy go przy powrocie do trybu okienkowego.
-        # Dotyczy TYLKO głównego okna — popupy nie mogą być maksymalizowane.
-        if getattr(self, '_is_root', False):
-            root_frame = self._get_root_frame()
-            if root_frame:
-                radius = '0px' if is_max else '12px'
-                root_frame.setStyleSheet(
-                    f"QFrame#{root_frame.objectName()} {{"
-                    f" background-color: {config.BG_COLOR};"
-                    f" border-radius: {radius}; }}"
-                )
+
 
     def _setup_grips(self):
         self._grips = []
@@ -2609,9 +2646,14 @@ class FramelessWindowMixin:
         # corrections prevent edge clipping on multi-monitor setups.
         if msg.message == 0x0083:  # WM_NCCALCSIZE
             if msg.wParam and self.isMaximized():
+                hwnd = int(self.winId())
                 user32 = ctypes.windll.user32
-                # SM_CXFRAME(32) + SM_CXPADDEDBORDER(92) = total hidden border
-                border = user32.GetSystemMetrics(32) + user32.GetSystemMetrics(92)
+                try:
+                    dpi = user32.GetDpiForWindow(hwnd) or 96
+                    border = (user32.GetSystemMetricsForDpi(32, dpi) +
+                              user32.GetSystemMetricsForDpi(92, dpi))
+                except Exception:
+                    border = user32.GetSystemMetrics(32) + user32.GetSystemMetrics(92)
                 params = ctypes.cast(msg.lParam, ctypes.POINTER(wintypes.RECT))
                 params[0].left   += border
                 params[0].top    += border
@@ -2652,28 +2694,16 @@ class FramelessWindowMixin:
             return True, 1  # MA_ACTIVATE — activate and pass click through normally
 
         # ── WM_NCHITTEST (0x0084) ─────────────────────────────────────────────
-        # Map pixel positions to hit-test codes so Windows can drive:
-        #   • resize (HTLEFT / HTRIGHT / …)
-        #   • native drag + Aero Snap (HTCAPTION)
-        #   • button clicks stay in client space (HTCLIENT)
-        #
-        # IMPORTANT: We intentionally do NOT use _tb.mapFromGlobal() here because
-        # after a focus-loss/regain cycle the widget coordinate mapping can be stale
-        # (Qt hasn't yet committed the NC geometry change from DWM). Instead we use
-        # self.childAt(pos) which queries the live widget tree at the client-space
-        # position — this is always reliable regardless of window focus state.
         if msg.message == 0x0084:  # WM_NCHITTEST
             x = msg.lParam & 0xFFFF
             if x & 0x8000: x -= 0x10000
             y = (msg.lParam >> 16) & 0xFFFF
             if y & 0x8000: y -= 0x10000
 
-            global_pos = QPoint(x, y)
-            pos = self.mapFromGlobal(global_pos)
+            pos = self.mapFromGlobal(QPoint(x, y))
             w, h = self.width(), self.height()
-            b = self._RESIZE_BORDER  # consistent with _update_grips
+            b = self._RESIZE_BORDER
 
-            # Resize border hit-tests (disabled when maximized)
             if not self.isMaximized():
                 lx, rx = pos.x() < b, pos.x() > w - b
                 ty, by = pos.y() < b, pos.y() > h - b
@@ -2686,17 +2716,31 @@ class FramelessWindowMixin:
                 if ty:        return True, 12  # HTTOP
                 if by:        return True, 15  # HTBOTTOM
 
-            # Title-bar hit-test — HTCAPTION gives native drag + snap + animations.
-            # We check against the fixed title-bar height (32 px) using self.childAt()
-            # instead of _tb.mapFromGlobal() — this survives focus-loss/regain cycles.
             _tb = getattr(self, '_title_bar', getattr(self, '_tb', None))
             tb_height = (_tb.height() if _tb else 32)
             if 0 <= pos.y() < tb_height:
                 child = self.childAt(pos)
+
+                # HTMAXBUTTON → Win11 Snap Layout flyout na hover.
+                # Windows obsługuje klik natywnie (SC_MAXIMIZE/SC_RESTORE).
+                if _tb and hasattr(_tb, 'btn_max') and not _tb.btn_max.isHidden():
+                    btn = _tb.btn_max
+                    btn_tl = btn.mapTo(self, QPoint(0, 0))
+                    if QRect(btn_tl, btn.size()).contains(pos):
+                        return True, 9  # HTMAXBUTTON
+
                 if not child or not child.inherits("QPushButton"):
                     return True, 2  # HTCAPTION
 
             return True, 1  # HTCLIENT
+
+        # ── WM_NCLBUTTONDBLCLK (0x00A3) ───────────────────────────────────────
+        # Double-click na HTCAPTION: delegujemy do _toggle_maximize().
+        if msg.message == 0x00A3:  # WM_NCLBUTTONDBLCLK
+            _tb = getattr(self, '_title_bar', getattr(self, '_tb', None))
+            if _tb and hasattr(_tb, '_toggle_maximize'):
+                _tb._toggle_maximize()
+            return True, 0
 
         return super().nativeEvent(eventType, message)
 
@@ -7386,11 +7430,10 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
         self._root_frame = QFrame()
         self._root_frame.setObjectName("RootFrame")
         _is_mac_root = platform.system() == "Darwin"
-        _root_radius = "0px" if _is_mac_root else "12px"
         self._root_frame.setStyleSheet(f"""
             QFrame#RootFrame {{
                 background-color: {config.BG_COLOR};
-                border-radius: {_root_radius};
+                border-radius: 0px;
             }}
         """)
         self._root_layout = QVBoxLayout(self._root_frame)
