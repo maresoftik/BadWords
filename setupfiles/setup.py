@@ -1192,7 +1192,12 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         console.print()
         if not os.path.isdir(venv_dir):
             log_step(f"Creating virtual environment ({target_py})...")
-            subprocess.run([target_py, "-m", "venv", venv_dir], check=True)
+            try:
+                subprocess.run([target_py, "-m", "venv", venv_dir], check=True, capture_output=True)
+            except subprocess.CalledProcessError:
+                log_step("Built-in venv failed, trying virtualenv...")
+                subprocess.run([target_py, "-m", "pip", "install", "virtualenv", "--quiet"], check=True)
+                subprocess.run([target_py, "-m", "virtualenv", venv_dir], check=True)
             log_ok("Virtual environment created.")
         else:
             log_ok("Virtual environment already exists.")
@@ -1619,12 +1624,18 @@ def option_move():
     try:
         subprocess.run([target_py, "-m", "venv", new_venv], check=True, capture_output=True)
         log_ok("Virtual environment created.")
-    except Exception as e:
-        log_err(f"Failed to create venv: {e}")
-        if rescued_pkgs and os.path.exists(rescued_pkgs):
-            shutil.rmtree(rescued_pkgs, ignore_errors=True)
-        pause()
-        return
+    except Exception:
+        try:
+            log_step("Built-in venv failed, trying virtualenv...")
+            subprocess.run([target_py, "-m", "pip", "install", "virtualenv", "--quiet"], check=True)
+            subprocess.run([target_py, "-m", "virtualenv", new_venv], check=True)
+            log_ok("Virtual environment created.")
+        except Exception as e:
+            log_err(f"Failed to create venv: {e}")
+            if rescued_pkgs and os.path.exists(rescued_pkgs):
+                shutil.rmtree(rescued_pkgs, ignore_errors=True)
+            pause()
+            return
 
     if os.name == "nt":
         venv_py = os.path.join(new_venv, "Scripts", "python.exe")
