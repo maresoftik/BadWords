@@ -173,11 +173,20 @@ if [ -z "$PYTHON_BIN" ] || [ "$VENV_OK" = "false" ]; then
 
         step "Extracting portable Python..."
         mkdir -p "$PBS_PERMANENT_DIR"
-        tar -xf "$_ARCHIVE" -C "$PBS_PERMANENT_DIR" --strip-components=2 2>/dev/null \
-            || tar -xf "$_ARCHIVE" -C "$PBS_PERMANENT_DIR" --strip-components=1 2>/dev/null \
+
+        # PBS install_only archives have a top-level python/ directory.
+        # --strip-components=1 gives us python/bin → bin/, python/lib → lib/ etc.
+        # We must NOT try --strip-components=2 first — tar succeeds with exit 0
+        # but scatters files into a broken layout (bin/python3 → python3 at root).
+        tar -xf "$_ARCHIVE" -C "$PBS_PERMANENT_DIR" --strip-components=1 2>/dev/null \
             || tar -xf "$_ARCHIVE" -C "$PBS_PERMANENT_DIR"
 
+        # Search for the binary: first in the expected bin/ dir, then anywhere
         PYTHON_BIN=$(find "$PBS_PERMANENT_DIR/bin" -name "python3*" -maxdepth 1 -type f -executable 2>/dev/null | sort -V | tail -1 || true)
+        if [ -z "$PYTHON_BIN" ]; then
+            # Extraction landed in a nested python/ dir (no strip worked correctly)
+            PYTHON_BIN=$(find "$PBS_PERMANENT_DIR" -name "python3" -type f -executable 2>/dev/null | head -1 || true)
+        fi
         [ -n "$PYTHON_BIN" ] || die "Could not find Python binary after extraction."
         VENV_OK=true
         ok "Portable Python ready: $PYTHON_BIN"

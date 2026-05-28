@@ -130,7 +130,14 @@ Don't like pasting terminal commands? I completely understand! You can run the s
 2. Extract the folder somewhere on your drive.
 3. Open the `setupfiles` folder inside the extracted directory.
 4. Run the setup script dedicated to your OS:
-  * **macOS / Linux**: Run the `.sh` script from the terminal.
+  * **macOS / Linux**: Open a terminal in the `setupfiles` folder and run:
+    ```
+    bash mac-setup.sh
+    ```
+    or on Linux:
+    ```
+    bash linux-setup.sh
+    ```
   * **Windows**: Open PowerShell/CMD in the folder *setupfiles* and run:
     ```
     powershell -ExecutionPolicy Bypass -File .\windows-setup.ps1
