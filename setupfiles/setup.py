@@ -59,6 +59,7 @@ def _resolve_script_dirs():
             bases.append(os.path.join(appdata, bmd_base))
         if progdata:
             bases.append(os.path.join(progdata, bmd_base, "Support"))
+            bases.append(os.path.join(progdata, bmd_base))
         if localappdata:
             pkg_root = os.path.join(localappdata, "Packages")
             if os.path.isdir(pkg_root):
