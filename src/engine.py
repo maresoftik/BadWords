@@ -118,7 +118,26 @@ class AudioEngine:
             # Natychmiastowe nadpisanie zabezpieczające przed dublowaniem żądań z innych wątków/okien
             self.os_doc.set_telemetry_pref("last_pinged_version", current_version)
             
-            install_type = "New Install" if not last_ping else "Update"
+            # Globalny marker pozwalający na identyfikację jako "Update" nawet po całkowitym usunięciu aplikacji
+            global_marker = os.path.join(self.os_doc.home_dir, ".badwords_installed")
+            
+            if not last_ping:
+                if os.path.exists(global_marker):
+                    install_type = "Update"
+                else:
+                    install_type = "New Install"
+                    try:
+                        with open(global_marker, "w", encoding="utf-8") as f:
+                            f.write(current_version)
+                    except Exception: pass
+            else:
+                install_type = "Update"
+                try:
+                    if not os.path.exists(global_marker):
+                        with open(global_marker, "w", encoding="utf-8") as f:
+                            f.write(current_version)
+                except Exception: pass
+                
             uuid_str = self.os_doc.get_telemetry_pref("analytics_uuid") or "unknown"
             allow_geo = self.os_doc.get_telemetry_pref("telemetry_allow_geo")
             machine_id = self.os_doc.get_telemetry_pref("analytics_uuid") or ""
