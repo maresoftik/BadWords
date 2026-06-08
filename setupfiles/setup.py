@@ -183,19 +183,34 @@ def readline_with_esc(show_cursor=True):
 
         def _win_paste_from_clipboard():
             """Try to read clipboard text on Windows."""
-            # Method 1: ctypes WinAPI (fastest, no subprocess)
+            # Method 1: ctypes WinAPI — must set proper argtypes/restype
+            # to avoid truncating 64-bit HANDLE/pointer values.
             try:
                 import ctypes
-                ok = ctypes.windll.user32.OpenClipboard(0)
-                if ok:
-                    hData = ctypes.windll.user32.GetClipboardData(13)  # CF_UNICODETEXT
-                    if hData:
-                        pData = ctypes.windll.kernel32.GlobalLock(hData)
-                        text = ctypes.wstring_at(pData)
-                        ctypes.windll.kernel32.GlobalUnlock(hData)
-                        ctypes.windll.user32.CloseClipboard()
-                        return text
-                    ctypes.windll.user32.CloseClipboard()
+                import ctypes.wintypes as wt
+                u32 = ctypes.windll.user32
+                k32 = ctypes.windll.kernel32
+                u32.OpenClipboard.argtypes = [wt.HWND]
+                u32.OpenClipboard.restype = wt.BOOL
+                u32.GetClipboardData.argtypes = [wt.UINT]
+                u32.GetClipboardData.restype = wt.HANDLE
+                u32.CloseClipboard.argtypes = []
+                u32.CloseClipboard.restype = wt.BOOL
+                k32.GlobalLock.argtypes = [wt.HANDLE]
+                k32.GlobalLock.restype = ctypes.c_void_p
+                k32.GlobalUnlock.argtypes = [wt.HANDLE]
+                k32.GlobalUnlock.restype = wt.BOOL
+                if u32.OpenClipboard(0):
+                    try:
+                        hData = u32.GetClipboardData(13)  # CF_UNICODETEXT
+                        if hData:
+                            pData = k32.GlobalLock(hData)
+                            if pData:
+                                text = ctypes.wstring_at(pData)
+                                k32.GlobalUnlock(hData)
+                                return text
+                    finally:
+                        u32.CloseClipboard()
             except Exception:
                 pass
             # Method 2: PowerShell fallback — force UTF-8 output to avoid cp1250 crash
@@ -216,8 +231,11 @@ def readline_with_esc(show_cursor=True):
             if ch == "\x03":
                 raise UserCancelled()
 
-            # ESC — could be a plain ESC or a bracketed paste from Windows Terminal
+            # ESC — could be a plain ESC or a bracketed paste from Windows Terminal.
+            # Windows Terminal (ConPTY) sends paste as \x1b[200~...\x1b[201~
+            # but characters may arrive with a slight delay. Wait before deciding.
             if ch == "\x1b":
+                time.sleep(0.05)  # give WT time to deliver the rest of the sequence
                 if msvcrt.kbhit():
                     next_ch = msvcrt.getwch()
                     if next_ch == "[":
@@ -238,9 +256,13 @@ def readline_with_esc(show_cursor=True):
                             # Bracketed paste start — collect until \x1b[201~
                             while True:
                                 if not msvcrt.kbhit():
-                                    time.sleep(0.01)
-                                    # give buffer time to fill; if still nothing after
-                                    # a short wait, treat as end of paste
+                                    # Paste chars from ConPTY can arrive slowly.
+                                    # Wait up to 100ms before giving up.
+                                    _paste_deadline = time.time() + 0.1
+                                    while time.time() < _paste_deadline:
+                                        if msvcrt.kbhit():
+                                            break
+                                        time.sleep(0.005)
                                     if not msvcrt.kbhit():
                                         break
                                 pc = msvcrt.getwch()
@@ -431,12 +453,34 @@ def readline_with_esc(show_cursor=True):
 
 # ── UI ───────────────────────────────────────────────────────
 def _resize(w=TERM_W, h=TERM_H):
-    """Resize terminal window."""
+    """Resize terminal window. Uses multiple methods for compatibility."""
     if os.name == "nt":
+        # Method 1: mode con (classic CMD)
         os.system(f"mode con cols={w} lines={h}")
+        # Method 2: Windows API (works when mode con is ignored, e.g. Windows Terminal)
+        try:
+            import ctypes
+            STD_OUT = ctypes.windll.kernel32.GetStdHandle(-11)
+            # Set buffer width
+            ctypes.windll.kernel32.SetConsoleScreenBufferSize(
+                STD_OUT, w | (9999 << 16)
+            )
+            # Set visible window size
+            class SMALL_RECT(ctypes.Structure):
+                _fields_ = [("Left", ctypes.c_short), ("Top", ctypes.c_short),
+                           ("Right", ctypes.c_short), ("Bottom", ctypes.c_short)]
+            rect = SMALL_RECT(0, 0, w - 1, h - 1)
+            ctypes.windll.kernel32.SetConsoleWindowInfo(STD_OUT, True, ctypes.byref(rect))
+        except Exception:
+            pass
+        # Method 3: VT100 escape (newer Windows Terminal may respect this)
+        try:
+            sys.stdout.write(f"\033[8;{h};{w}t")
+            sys.stdout.flush()
+        except Exception:
+            pass
     else:
         # ANSI resize works in Terminal.app (macOS) and most Linux terminals.
-        # Use a slightly smaller height on macOS due to the menu bar.
         mac_h = max(h - 2, 24) if ("darwin" in PLAT or "mac" in PLAT) else h
         sys.stdout.write(f"\033[8;{mac_h};{w}t")
         sys.stdout.flush()
@@ -1173,14 +1217,22 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
                     log_warn("FFmpeg download failed. App may not work without it.")
 
         # ── Python for venv ───────────────────────────────────
+        # The bootstrap Python (from the bootstrapper) may be embedded/portable
+        # and lack the venv module. We search for a system Python that has it.
         bootstrap_py = ARGS.bootstrap_python
-        target_py = bootstrap_py if os.path.isfile(bootstrap_py) else sys.executable
-        for cmd in ["python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3"]:
+        target_py = None
+
+        # Search order: versioned names (unix), then py/python (Windows), then bootstrap fallback
+        _py_candidates = ["python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3"]
+        if os.name == "nt":
+            _py_candidates += ["py", "python"]
+
+        for cmd in _py_candidates:
             exe = shutil.which(cmd)
             if exe:
                 try:
                     r = subprocess.run([exe, "-c",
-                        "import sys; exit(0 if (3,10) <= sys.version_info < (3,15) else 1)"],
+                        "import sys, importlib; importlib.import_module('venv'); exit(0 if (3,10) <= sys.version_info < (3,15) else 1)"],
                         capture_output=True)
                     if r.returncode == 0:
                         target_py = exe
@@ -1188,16 +1240,22 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
                 except Exception:
                     pass
 
+        # Fallback: use bootstrap Python (may not have venv, but virtualenv fallback handles it)
+        if not target_py:
+            target_py = bootstrap_py if os.path.isfile(bootstrap_py) else sys.executable
+
         # ── Venv ──────────────────────────────────────────────
         console.print()
         if not os.path.isdir(venv_dir):
             log_step(f"Creating virtual environment ({target_py})...")
             try:
                 subprocess.run([target_py, "-m", "venv", venv_dir], check=True, capture_output=True)
-            except subprocess.CalledProcessError:
+            except (subprocess.CalledProcessError, FileNotFoundError):
                 log_step("Built-in venv failed, trying virtualenv...")
-                subprocess.run([target_py, "-m", "pip", "install", "virtualenv", "--quiet"], check=True)
-                subprocess.run([target_py, "-m", "virtualenv", venv_dir], check=True)
+                subprocess.run([target_py, "-m", "pip", "install", "virtualenv", "--quiet"],
+                               check=True, capture_output=True)
+                subprocess.run([target_py, "-m", "virtualenv", venv_dir],
+                               check=True, capture_output=True)
             log_ok("Virtual environment created.")
         else:
             log_ok("Virtual environment already exists.")
@@ -1604,21 +1662,29 @@ def option_move():
         except Exception:
             shutil.rmtree(old_libs, ignore_errors=True)
 
-    # Pick best available Python
+    # Pick best available Python (must have venv support)
     bootstrap_py = ARGS.bootstrap_python
-    target_py = bootstrap_py if os.path.isfile(bootstrap_py) else sys.executable
-    for cmd in ["python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3"]:
+    target_py = None
+
+    _py_candidates = ["python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3"]
+    if os.name == "nt":
+        _py_candidates += ["py", "python"]
+
+    for cmd in _py_candidates:
         exe = shutil.which(cmd)
         if exe:
             try:
                 r = subprocess.run([exe, "-c",
-                    "import sys; exit(0 if (3,10) <= sys.version_info < (3,15) else 1)"],
+                    "import sys, importlib; importlib.import_module('venv'); exit(0 if (3,10) <= sys.version_info < (3,15) else 1)"],
                     capture_output=True)
                 if r.returncode == 0:
                     target_py = exe
                     break
             except Exception:
                 pass
+
+    if not target_py:
+        target_py = bootstrap_py if os.path.isfile(bootstrap_py) else sys.executable
 
     log_step(f"Creating fresh venv ({target_py})...")
     try:
@@ -1627,8 +1693,10 @@ def option_move():
     except Exception:
         try:
             log_step("Built-in venv failed, trying virtualenv...")
-            subprocess.run([target_py, "-m", "pip", "install", "virtualenv", "--quiet"], check=True)
-            subprocess.run([target_py, "-m", "virtualenv", new_venv], check=True)
+            subprocess.run([target_py, "-m", "pip", "install", "virtualenv", "--quiet"],
+                           check=True, capture_output=True)
+            subprocess.run([target_py, "-m", "virtualenv", new_venv],
+                           check=True, capture_output=True)
             log_ok("Virtual environment created.")
         except Exception as e:
             log_err(f"Failed to create venv: {e}")
