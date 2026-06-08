@@ -1,18 +1,20 @@
 #!/bin/bash
 # ============================================================
-#  BadWords macOS Bootstrapper v1.0
-#  Run with: bash <(curl -fsSL https://raw.githubusercontent.com/veritus-git/BadWords/main/setupfiles/mac-setup.sh)
+#  BadWords macOS Bootstrapper v2.0
+#  Run with: curl -fsSL "https://raw.githubusercontent.com/veritus-git/BadWords/main/setupfiles/mac-setup.sh" | bash
 #
-#  Purpose: prepare Python environment, launch setup.py in a
-#  fresh Terminal window, then exit immediately.
-#  Supports boot-time caching — subsequent runs within the same
-#  macOS session launch instantly from the persistent cache.
+#  Sole purpose: prepare Python + rich, then launch setup.py.
+#  Downloads python-build-standalone and installs rich into
+#  a temp directory. The portable Python is cached permanently;
+#  everything else is fresh on every run.
 # ============================================================
 
 set -euo pipefail
 
 INSTALLER_URL="https://raw.githubusercontent.com/veritus-git/BadWords/main/setupfiles/setup.py"
 INSTALLER_URL_FB="https://gitlab.com/badwords/BadWords/-/raw/main/setupfiles/setup.py"
+PBS_FALLBACK_TAG="20250317"
+PBS_FALLBACK_VER="3.12.9"
 
 # ── Local File Detection ──────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd 2>/dev/null || echo "")"
@@ -22,11 +24,14 @@ if [ -f "$LOCAL_SETUP" ]; then
     LOCAL_REPO="$(dirname "$SCRIPT_DIR")"
 fi
 
-# ── Persistent cache directory ────────────────────────────────
+# ── Directories ───────────────────────────────────────────────
+# Cached: only the portable Python binary (survives reboots)
 CACHE_DIR="$HOME/Library/Caches/BadWords-bootstrap"
-CACHE_VENV_PY="$CACHE_DIR/venv/bin/python"
-CACHE_INSTALL="$CACHE_DIR/setup.py"
-CACHE_MARKER="$CACHE_DIR/boot_marker.txt"
+PBS_DIR="$CACHE_DIR/python"
+
+# Temp: everything else (fresh each run)
+BW_TMP=$(mktemp -d)
+trap 'rm -rf "$BW_TMP"' EXIT INT TERM
 
 # ── Colors ────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -36,279 +41,142 @@ ok()   { echo -e "${GREEN}[✓]${NC} $*"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 die()  { echo -e "${RED}[✗]${NC} $*" >&2; echo ""; read -r -p "Press Enter to close..."; exit 1; }
 
-# ── Boot-time marker (clears cache on next boot) ──────────────
-_boot_time() {
-    # sysctl kern.boottime returns something like: { sec = 1746091234, usec = 0 }
-    sysctl -n kern.boottime 2>/dev/null \
-        | grep -oE 'sec = [0-9]+' \
-        | grep -oE '[0-9]+' \
-        || date +%s   # fallback: current unix timestamp (no caching on failure)
-}
-BOOT_TIME=$(_boot_time)
-
-# ── Helper: run installer in THIS terminal window ─────────────
+# ── Helper: launch installer ──────────────────────────────────
 _launch_installer() {
     local py="$1"
     local script="$2"
-    local extra_pypath="${3:-}"
+    local pkg_dir="$3"
 
-    if [ -n "$extra_pypath" ]; then
-        export PYTHONPATH="$extra_pypath"
-    fi
-    
-    # Clear screen, then replace this shell with Python
+    export PYTHONPATH="$pkg_dir"
     clear
-    
-    # To ensure a perfectly clean window title in Terminal.app (without args cluttering it),
-    # we create a temporary script named "BadWords Setup" and execute it directly.
-    local clean_script="$CACHE_DIR/BadWords Setup"
-    if ! { echo "#!$py" > "$clean_script" && cat "$script" >> "$clean_script" && chmod +x "$clean_script"; }; then
-        # If we can't create the wrapper (e.g. read-only cache dir), fall back to running directly
-        warn "Could not create clean launcher — falling back to direct execution."
-        if [ -n "$LOCAL_REPO" ]; then
-            exec "$py" "$script" --platform macos --bootstrap-python "$py" --local-repo "$LOCAL_REPO" < /dev/tty
-        else
-            exec "$py" "$script" --platform macos --bootstrap-python "$py" < /dev/tty
-        fi
-    fi
-    
+
+    local args=(--platform macos --bootstrap-python "$py")
     if [ -n "$LOCAL_REPO" ]; then
-        exec "$clean_script" --platform macos --bootstrap-python "$py" --local-repo "$LOCAL_REPO" < /dev/tty
-    else
-        exec "$clean_script" --platform macos --bootstrap-python "$py" < /dev/tty
+        args+=(--local-repo "$LOCAL_REPO")
     fi
+    exec "$py" "$script" "${args[@]}" < /dev/tty
 }
 
-# ── FAST PATH: boot-time cache ────────────────────────────────
-if [ -f "$CACHE_MARKER" ] && [ -f "$CACHE_VENV_PY" ] && [ -f "$CACHE_INSTALL" ]; then
-    stored=$(cat "$CACHE_MARKER" 2>/dev/null || echo "")
-    if [ "$stored" = "$BOOT_TIME" ]; then
-        echo ""
-        echo -e "  ${GREEN}BadWords Setup${NC}"
-        echo -e "  ${CYAN}Cached environment found — refreshing installer script...${NC}"
-
-        # Venv is cached (saves time) but setup.py is always refreshed
-        refresh_ok=false
-        if [ -f "$LOCAL_SETUP" ]; then
-            cp "$LOCAL_SETUP" "$CACHE_INSTALL"
-            refresh_ok=true
-        elif curl -fsSL --max-time 15 "$INSTALLER_URL" -o "$CACHE_INSTALL" 2>/dev/null; then
-            refresh_ok=true
-        elif curl -fsSL --max-time 15 "$INSTALLER_URL_FB" -o "$CACHE_INSTALL" 2>/dev/null; then
-            refresh_ok=true
-        fi
-        if [ "$refresh_ok" = false ]; then
-            warn "Could not refresh setup.py — launching from cached copy."
-        fi
-
-        echo -e "  ${CYAN}Launching instantly (cached environment)...${NC}"
-        echo ""
-        _launch_installer "$CACHE_VENV_PY" "$CACHE_INSTALL"
-        # exec above replaces the shell — this line is never reached
-        exit 0
-    fi
-fi
-
-# ── SLOW PATH: Full setup ─────────────────────────────────────
+# ── MAIN ──────────────────────────────────────────────────────
 echo ""
 echo -e "  ${GREEN}BadWords macOS Bootstrapper${NC}"
 echo -e "  ${CYAN}Preparing environment...${NC}"
 echo ""
 
 mkdir -p "$CACHE_DIR"
-BW_TMP=$(mktemp -d)
-trap 'rm -rf "$BW_TMP"' EXIT INT TERM
 
-# ── 1. Find Python 3.10+ ──────────────────────────────────────
-step "Looking for compatible Python (3.10+)..."
+# -- 1. Ensure portable Python exists (cached) -----------------
 PYTHON_BIN=""
 
-# Check common locations in priority order
-for cmd in python3.14 python3.13 python3.12 python3.11 python3.10 python3 python; do
-    if command -v "$cmd" &>/dev/null; then
-        if "$cmd" -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
-            PYTHON_BIN="$(command -v "$cmd")"
-            ok "Found system Python: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
-            break
-        fi
+# Check cached PBS Python
+_find_cached_python() {
+    local bin
+    bin=$(find "$PBS_DIR/bin" -name "python3*" -maxdepth 1 -type f -perm +111 2>/dev/null | sort -V | tail -1 || true)
+    if [ -z "$bin" ]; then
+        bin=$(find "$PBS_DIR" -name "python3" -type f -perm +111 2>/dev/null | head -1 || true)
     fi
-done
+    echo "$bin"
+}
 
-# Homebrew locations (Apple Silicon and Intel)
-if [ -z "$PYTHON_BIN" ]; then
-    for brew_py in \
-        /opt/homebrew/bin/python3.14 \
-        /opt/homebrew/bin/python3.13 \
-        /opt/homebrew/bin/python3.12 \
-        /opt/homebrew/bin/python3.11 \
-        /opt/homebrew/bin/python3.10 \
-        /opt/homebrew/bin/python3 \
-        /usr/local/bin/python3.14 \
-        /usr/local/bin/python3.13 \
-        /usr/local/bin/python3.12 \
-        /usr/local/bin/python3.11 \
-        /usr/local/bin/python3.10 \
-        /usr/local/bin/python3; do
-        if [ -x "$brew_py" ]; then
-            if "$brew_py" -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
-                PYTHON_BIN="$brew_py"
-                ok "Found Homebrew Python: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
-                break
+if [ -d "$PBS_DIR" ]; then
+    PYTHON_BIN=$(_find_cached_python)
+    if [ -n "$PYTHON_BIN" ]; then
+        if "$PYTHON_BIN" -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
+            if "$PYTHON_BIN" -m pip --version &>/dev/null; then
+                ok "Using cached portable Python: $PYTHON_BIN"
+            else
+                PYTHON_BIN=""
             fi
+        else
+            PYTHON_BIN=""
         fi
-    done
-fi
-
-# pyenv
-if [ -z "$PYTHON_BIN" ] && [ -d "$HOME/.pyenv/versions" ]; then
-    for py in "$HOME"/.pyenv/versions/3.1[0-9]*/bin/python3; do
-        if [ -x "$py" ] && "$py" -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
-            PYTHON_BIN="$py"
-            ok "Found pyenv Python: $PYTHON_BIN"
-            break
-        fi
-    done
-fi
-
-# ── 2. Test venv support ──────────────────────────────────────
-VENV_OK=false
-if [ -n "$PYTHON_BIN" ]; then
-    step "Testing virtual environment support..."
-    _tv="$BW_TMP/test_venv"
-    if "$PYTHON_BIN" -m venv "$_tv" &>/dev/null && [ -f "$_tv/bin/python" ]; then
-        VENV_OK=true
-        ok "venv works."
-    else
-        warn "System venv not functional. Will use portable Python."
     fi
 fi
 
-# ── 3. python-build-standalone fallback ───────────────────────
-PBS_PERMANENT_DIR="$CACHE_DIR/python"
-PBS_FALLBACK_TAG="20250317"
-PBS_FALLBACK_VER="3.12.9"
+if [ -z "$PYTHON_BIN" ]; then
+    step "Downloading portable Python (python-build-standalone)..."
 
-if [ -z "$PYTHON_BIN" ] || [ "$VENV_OK" = "false" ]; then
-    # Reuse previously downloaded portable Python
-    PBS_BIN=$(find "$PBS_PERMANENT_DIR/bin" -name "python3*" -maxdepth 1 -type f -executable 2>/dev/null | sort -V | tail -1 || true)
-    if [ -n "$PBS_BIN" ] && "$PBS_BIN" -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
-        ok "Reusing cached portable Python: $PBS_BIN"
-        PYTHON_BIN="$PBS_BIN"
-        VENV_OK=true
-    else
-        warn "Downloading portable Python (python-build-standalone)..."
-        ARCH=$(uname -m)
-        case "$ARCH" in
-            x86_64)        PBS_ARCH="x86_64-apple-darwin" ;;
-            arm64|aarch64) PBS_ARCH="aarch64-apple-darwin" ;;
-            *) die "Unsupported CPU architecture: $ARCH" ;;
-        esac
+    # Clean old cache
+    rm -rf "$PBS_DIR"
+    mkdir -p "$PBS_DIR"
 
-        # Try GitHub API for latest CPython 3.12
-        _PBS_URL=""
-        _API_RESP=$(curl -fsSL --max-time 15 \
-            "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" 2>/dev/null || true)
-        if [ -n "$_API_RESP" ]; then
-            _PBS_URL=$(echo "$_API_RESP" \
-                | grep -o '"browser_download_url": "[^"]*cpython-3\.12[^"]*'"${PBS_ARCH}"'-install_only\.tar\.gz"' \
-                | head -1 \
-                | sed 's/.*"browser_download_url": "\(.*\)"/\1/' || true)
-        fi
-        # Fallback to hardcoded known-good URL
-        if [ -z "$_PBS_URL" ]; then
-            warn "GitHub API unavailable. Using fallback URL."
-            _PBS_URL="https://github.com/indygreg/python-build-standalone/releases/download/${PBS_FALLBACK_TAG}/cpython-${PBS_FALLBACK_VER}+${PBS_FALLBACK_TAG}-${PBS_ARCH}-install_only.tar.gz"
-        fi
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)        PBS_ARCH="x86_64-apple-darwin" ;;
+        arm64|aarch64) PBS_ARCH="aarch64-apple-darwin" ;;
+        *) die "Unsupported CPU architecture: $ARCH" ;;
+    esac
 
-        step "Downloading portable Python..."
-        _ARCHIVE="$BW_TMP/pbs.tar.gz"
-        curl -fsSL "$_PBS_URL" -o "$_ARCHIVE" || die "Download failed. Check your internet connection."
-
-        step "Extracting..."
-        mkdir -p "$PBS_PERMANENT_DIR"
-
-        # PBS install_only archives have a top-level python/ directory.
-        # --strip-components=1 gives us python/bin → bin/, python/lib → lib/ etc.
-        # We must NOT try --strip-components=2 first — tar succeeds with exit 0
-        # but scatters files into a broken layout (bin/python3 → python3 at root).
-        tar -xf "$_ARCHIVE" -C "$PBS_PERMANENT_DIR" --strip-components=1 2>/dev/null \
-            || tar -xf "$_ARCHIVE" -C "$PBS_PERMANENT_DIR"
-
-        # Search for the binary: first in the expected bin/ dir, then anywhere
-        PYTHON_BIN=$(find "$PBS_PERMANENT_DIR/bin" -name "python3*" -maxdepth 1 -type f -executable 2>/dev/null | sort -V | tail -1 || true)
-        if [ -z "$PYTHON_BIN" ]; then
-            # Extraction landed in a nested python/ dir (no strip worked correctly)
-            PYTHON_BIN=$(find "$PBS_PERMANENT_DIR" -name "python3" -type f -executable 2>/dev/null | head -1 || true)
-        fi
-        [ -n "$PYTHON_BIN" ] || die "Could not find Python binary after extraction."
-        VENV_OK=true
-        ok "Portable Python ready: $PYTHON_BIN"
+    # Try GitHub API for latest CPython 3.12
+    _PBS_URL=""
+    _API_RESP=$(curl -fsSL --max-time 15 \
+        "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" 2>/dev/null || true)
+    if [ -n "$_API_RESP" ]; then
+        _PBS_URL=$(echo "$_API_RESP" \
+            | grep -o '"browser_download_url": "[^"]*cpython-3\.12[^"]*'"${PBS_ARCH}"'-install_only\.tar\.gz"' \
+            | head -1 \
+            | sed 's/.*"browser_download_url": "\(.*\)"/\1/' || true)
     fi
+    if [ -z "$_PBS_URL" ]; then
+        warn "GitHub API unavailable. Using fallback URL."
+        _PBS_URL="https://github.com/indygreg/python-build-standalone/releases/download/${PBS_FALLBACK_TAG}/cpython-${PBS_FALLBACK_VER}+${PBS_FALLBACK_TAG}-${PBS_ARCH}-install_only.tar.gz"
+    fi
+
+    step "Downloading..."
+    _ARCHIVE="$BW_TMP/pbs.tar.gz"
+    curl -fsSL "$_PBS_URL" -o "$_ARCHIVE" || die "Download failed. Check your internet connection."
+
+    step "Extracting..."
+    # PBS install_only archives have a top-level python/ directory.
+    # --strip-components=1 gives us python/bin → bin/, python/lib → lib/ etc.
+    tar -xf "$_ARCHIVE" -C "$PBS_DIR" --strip-components=1 2>/dev/null \
+        || tar -xf "$_ARCHIVE" -C "$PBS_DIR"
+
+    PYTHON_BIN=$(_find_cached_python)
+    [ -n "$PYTHON_BIN" ] || die "Could not find Python binary after extraction."
+
+    # Ensure pip is available
+    if ! "$PYTHON_BIN" -m pip --version &>/dev/null; then
+        step "Bootstrapping pip..."
+        _GETPIP="$BW_TMP/get-pip.py"
+        curl -fsSL "https://bootstrap.pypa.io/get-pip.py" -o "$_GETPIP" || die "Failed to download get-pip.py."
+        "$PYTHON_BIN" "$_GETPIP" --quiet 2>/dev/null || warn "pip bootstrap returned non-zero."
+    fi
+
+    ok "Portable Python ready: $PYTHON_BIN"
 fi
 
-[ -n "$PYTHON_BIN" ] || die "No suitable Python 3.10+ found. Install via: brew install python3"
-
-# ── 4. Create bootstrap venv in cache ────────────────────────
-step "Creating bootstrap environment..."
-
-# Wipe stale venv (cache miss = boot changed, rebuild)
-if [ -d "$CACHE_DIR/venv" ]; then
-    rm -rf "$CACHE_DIR/venv"
-fi
-
-EXTRA_PYPATH=""
-if "$PYTHON_BIN" -m venv "$CACHE_DIR/venv" &>/dev/null && [ -f "$CACHE_VENV_PY" ]; then
-    ok "Bootstrap venv created."
-else
-    warn "venv creation failed. Using --target fallback."
-    PKG_DIR="$CACHE_DIR/packages"
-    mkdir -p "$PKG_DIR"
-    CACHE_VENV_PY="$PYTHON_BIN"
-    EXTRA_PYPATH="$PKG_DIR"
-fi
-
-# ── 5. Install rich ───────────────────────────────────────────
+# -- 2. Install rich to temp ----------------------------------
 step "Installing dependencies (rich)..."
-if [ -z "$EXTRA_PYPATH" ]; then
-    "$CACHE_VENV_PY" -m pip install --upgrade pip --quiet 2>/dev/null || true
-    "$CACHE_VENV_PY" -m pip install rich --quiet \
-        || { warn "venv pip failed, trying --target fallback..."
-             PKG_DIR="$CACHE_DIR/packages"; mkdir -p "$PKG_DIR"
-             "$PYTHON_BIN" -m pip install rich --target "$PKG_DIR" --quiet
-             EXTRA_PYPATH="$PKG_DIR"
-             CACHE_VENV_PY="$PYTHON_BIN"; }
-else
-    "$PYTHON_BIN" -m pip install rich --target "$EXTRA_PYPATH" --quiet \
-        || die "Failed to install 'rich'. Check your internet connection."
-fi
+PKG_DIR="$BW_TMP/packages"
+mkdir -p "$PKG_DIR"
+"$PYTHON_BIN" -m pip install rich --target "$PKG_DIR" --quiet 2>/dev/null \
+    || die "Failed to install 'rich'. Check your internet connection."
 ok "Dependencies ready."
 
-# ── 6. Download setup.py into cache ────────────────────────
+# -- 3. Download setup.py to temp -----------------------------
 step "Downloading BadWords installer..."
+SETUP_PY="$BW_TMP/setup.py"
 downloaded=false
+
 if [ -f "$LOCAL_SETUP" ]; then
     ok "Found local setup.py."
-    cp "$LOCAL_SETUP" "$CACHE_INSTALL"
+    cp "$LOCAL_SETUP" "$SETUP_PY"
     downloaded=true
-elif curl -fsSL --max-time 30 "$INSTALLER_URL" -o "$CACHE_INSTALL" 2>/dev/null; then
+elif curl -fsSL --max-time 30 "$INSTALLER_URL" -o "$SETUP_PY" 2>/dev/null; then
     downloaded=true
 else
     warn "GitHub unavailable. Trying GitLab fallback..."
-    if curl -fsSL --max-time 30 "$INSTALLER_URL_FB" -o "$CACHE_INSTALL" 2>/dev/null; then
+    if curl -fsSL --max-time 30 "$INSTALLER_URL_FB" -o "$SETUP_PY" 2>/dev/null; then
         downloaded=true
     fi
 fi
 [ "$downloaded" = true ] || die "Failed to download setup.py from both GitHub and GitLab."
 ok "Installer ready."
 
-# ── 7. Write boot-time cache marker ──────────────────────────
-echo "$BOOT_TIME" > "$CACHE_MARKER"
-ok "Cache marker written."
-
-# ── 8. Launch installer in this terminal window ──────────────
+# -- 4. Launch installer ---------------------------------------
 echo ""
 echo -e "  ${CYAN}Launching BadWords Installer...${NC}"
-sleep 0.5
-_launch_installer "$CACHE_VENV_PY" "$CACHE_INSTALL" "$EXTRA_PYPATH"
-# exec above replaces the shell — this line is never reached
+sleep 0.3
+_launch_installer "$PYTHON_BIN" "$SETUP_PY" "$PKG_DIR"
 exit 0
