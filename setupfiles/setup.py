@@ -1451,12 +1451,11 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
                     
                 try:
                     import shutil, sys, subprocess
-                    sys_py = shutil.which("python")
+                    sys_py = shutil.which("python") or shutil.which("python3")
                     if sys_py:
-                        if os.path.normcase(os.path.abspath(sys.executable)) != os.path.normcase(os.path.abspath(sys_py)):
-                            res = subprocess.run([sys_py, "-V"], capture_output=True, text=True, timeout=2)
-                            if "Python 3." in res.stdout or "Python 3." in res.stderr: 
-                                return True
+                        res = subprocess.run([sys_py, "-V"], capture_output=True, text=True, timeout=2)
+                        if "Python 3." in res.stdout or "Python 3." in res.stderr: 
+                            return True
                 except Exception: pass
                 return False
 
@@ -1467,10 +1466,14 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
                     py_url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe"
                     py_exe = os.path.join(tempfile.gettempdir(), "python_installer.exe")
                     if download(py_url, py_exe):
-                        subprocess.run([py_exe, "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_test=0"], check=True)
-                        sp_py.done(ok=True)
-                        log_ok("System Python 3.10 installed successfully.")
-                        py_auto_installed = True
+                        res = subprocess.run([py_exe, "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_test=0"])
+                        if res.returncode in (0, 1641, 3010):
+                            sp_py.done(ok=True)
+                            log_ok("System Python 3.10 installed successfully.")
+                            py_auto_installed = True
+                        else:
+                            sp_py.done(ok=False)
+                            log_warn(f"Failed to auto-install Python: exit code {res.returncode}")
                     else:
                         sp_py.done(ok=False)
                         log_warn("Failed to download Python installer.")
