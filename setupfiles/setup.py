@@ -1527,7 +1527,8 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         console.print(Text(f"{PAD}   IMPORTANT FOR DAVINCI RESOLVE:", style="bold yellow"), no_wrap=True)
         if py_auto_installed:
             console.print(Text(f"{PAD}   1. Python was installed in the background.", style="yellow"), no_wrap=True)
-            console.print(Text(f"{PAD}   2. You MUST restart DaVinci Resolve to detect it (if that fails, restart computer).", style="bold yellow"), no_wrap=True)
+            console.print(Text(f"{PAD}   2. You MUST restart DaVinci Resolve to detect it", style="bold yellow"), no_wrap=True)
+            console.print(Text(f"{PAD}      If that fails, a reboot might be required", style="bold yellow"), no_wrap=True)
             console.print(Text(f"{PAD}   3. Find the script in: Workspace -> Scripts -> BadWords", style="yellow"), no_wrap=True)
         else:
             console.print(Text(f"{PAD}   1. A restart of DaVinci Resolve might be required.", style="yellow"), no_wrap=True)
