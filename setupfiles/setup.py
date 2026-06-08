@@ -1126,7 +1126,7 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         os.makedirs(bin_dir, exist_ok=True)
 
         log_step("Syncing application files...")
-        protected_files = {"pref.json", "user.json", "settings.json", "badwords_debug.log"}
+        protected_files = {"pref.json", "user.json", "settings.json", "badwords_debug.log", ".python_auto_installed"}
         protected_dirs  = {"models", "saves", "venv", "bin", "libs"}
         src_list = [s for s in [source_path, assets_path] if s and os.path.isdir(s)]
         is_update = os.path.isdir(venv_dir)
@@ -1461,16 +1461,20 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
 
             if not _has_system_python():
                 log_warn("System Python not detected. DaVinci Resolve requires it.")
-                sp_py = Spinner("Downloading & installing System Python 3.10 (background)...").start()
+                sp_py = Spinner("Downloading & installing System Python 3.10...").start()
                 try:
                     py_url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe"
                     py_exe = os.path.join(tempfile.gettempdir(), "python_installer.exe")
                     if download(py_url, py_exe):
-                        res = subprocess.run([py_exe, "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_test=0"])
+                        res = subprocess.run([py_exe, "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_test=0", "Include_launcher=0"])
                         if res.returncode in (0, 1641, 3010):
                             sp_py.done(ok=True)
                             log_ok("System Python 3.10 installed successfully.")
                             py_auto_installed = True
+                            try:
+                                with open(os.path.join(install_dir, ".python_auto_installed"), "w") as f:
+                                    f.write("1")
+                            except Exception: pass
                         else:
                             sp_py.done(ok=False)
                             log_warn(f"Failed to auto-install Python: exit code {res.returncode}")
@@ -1523,7 +1527,7 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         console.print(Text(f"{PAD}   IMPORTANT FOR DAVINCI RESOLVE:", style="bold yellow"), no_wrap=True)
         if py_auto_installed:
             console.print(Text(f"{PAD}   1. Python was installed in the background.", style="yellow"), no_wrap=True)
-            console.print(Text(f"{PAD}   2. You MUST restart your computer for Resolve to detect it.", style="bold yellow"), no_wrap=True)
+            console.print(Text(f"{PAD}   2. You MUST restart DaVinci Resolve to detect it (if that fails, restart computer).", style="bold yellow"), no_wrap=True)
             console.print(Text(f"{PAD}   3. Find the script in: Workspace -> Scripts -> BadWords", style="yellow"), no_wrap=True)
         else:
             console.print(Text(f"{PAD}   1. A restart of DaVinci Resolve might be required.", style="yellow"), no_wrap=True)
@@ -1597,7 +1601,7 @@ def option_repair():
     log_step(f"Cleaning core files in: {install_dir}")
     
     # Files/folders to KEEP
-    protected = {"models", "saves", "pref.json", "user.json", "settings.json", "badwords_debug.log", "dev.json", "venv"}
+    protected = {"models", "saves", "pref.json", "user.json", "settings.json", "badwords_debug.log", "dev.json", "venv", ".python_auto_installed"}
     
     sp_rm = Spinner("Removing core components").start()
     errors = []
@@ -2110,6 +2114,43 @@ def option_uninstall():
         log_info("Uninstall cancelled.")
         pause()
         return
+
+    # Check for auto-installed python
+    python_auto_installed = False
+    for d in all_install_dirs:
+        if os.path.exists(os.path.join(d, ".python_auto_installed")):
+            python_auto_installed = True
+            break
+            
+    if python_auto_installed:
+        console.print()
+        console.print(Text(f"{PAD}BadWords installer previously downloaded Python for its operation.", style="bold yellow"), no_wrap=True)
+        console.print(Text(f"{PAD}Do you wish to uninstall it as well?", style="bold yellow"), no_wrap=True)
+        console.print(Text(f"{PAD}  [yes] - Uninstalls Python from your system.", style="yellow"), no_wrap=True)
+        console.print(Text(f"{PAD}  [no]  - Leaves Python (safe if you use it for other apps).", style="yellow"), no_wrap=True)
+        console.print()
+        console.print(Text(f'{PAD}Type "yes" or "no" and press Enter: ', style="bold white"), end="", no_wrap=True)
+        sys.stdout.flush()
+        try:
+            ans_py = readline_with_esc()
+            if ans_py.strip().lower() == "yes":
+                log_step("Uninstalling Python 3.10...")
+                sp_py_un = Spinner("Removing Python from system...").start()
+                try:
+                    py_url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe"
+                    py_exe = os.path.join(tempfile.gettempdir(), "python_uninstaller.exe")
+                    if download(py_url, py_exe):
+                        res = subprocess.run([py_exe, "/uninstall", "/quiet"])
+                        sp_py_un.done(ok=(res.returncode in (0, 1641, 3010)))
+                    else:
+                        sp_py_un.done(ok=False)
+                        log_warn("Failed to download Python uninstaller.")
+                except Exception as e:
+                    sp_py_un.done(ok=False)
+                    log_warn(f"Failed to uninstall Python: {e}")
+        except UserCancelled:
+            pass
+        console.print()
 
     _do_uninstall(resolve_dirs, all_install_dirs)
 
