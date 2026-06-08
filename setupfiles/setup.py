@@ -29,6 +29,9 @@ parser.add_argument("--local-repo", default="")
 ARGS, _ = parser.parse_known_args()
 PLAT = ARGS.platform.lower()
 
+# Detect Windows Terminal (ConPTY) — Win32 console API calls break its pipe
+_IS_WINDOWS_TERMINAL = bool(os.environ.get("WT_SESSION", ""))
+
 # ── Platform helpers ─────────────────────────────────────────
 APP_NAME = "BadWords"
 
@@ -453,38 +456,43 @@ def readline_with_esc(show_cursor=True):
 
 # ── UI ───────────────────────────────────────────────────────
 def _resize(w=TERM_W, h=TERM_H):
-    """Resize terminal window. Uses multiple methods for compatibility."""
+    """Resize terminal window.
+    IMPORTANT: On Windows Terminal (ConPTY), Win32 console API calls like
+    SetConsoleScreenBufferSize / SetConsoleWindowInfo BREAK the pipe and
+    cause every subsequent write to crash with WinError 233. We MUST skip
+    them when WT_SESSION is detected."""
+    global TERM_W
     if os.name == "nt":
-        # Method 1: mode con (classic CMD)
+        # mode con: safe on both classic CMD and WT (WT ignores it visually)
         os.system(f"mode con cols={w} lines={h}")
-        # Method 2: Windows API (works when mode con is ignored, e.g. Windows Terminal)
-        try:
-            import ctypes
-            STD_OUT = ctypes.windll.kernel32.GetStdHandle(-11)
-            # Set buffer width
-            ctypes.windll.kernel32.SetConsoleScreenBufferSize(
-                STD_OUT, w | (9999 << 16)
-            )
-            # Set visible window size
-            class SMALL_RECT(ctypes.Structure):
-                _fields_ = [("Left", ctypes.c_short), ("Top", ctypes.c_short),
-                           ("Right", ctypes.c_short), ("Bottom", ctypes.c_short)]
-            rect = SMALL_RECT(0, 0, w - 1, h - 1)
-            ctypes.windll.kernel32.SetConsoleWindowInfo(STD_OUT, True, ctypes.byref(rect))
-        except Exception:
-            pass
-        # Method 3: VT100 escape (newer Windows Terminal may respect this)
-        try:
-            sys.stdout.write(f"\033[8;{h};{w}t")
-            sys.stdout.flush()
-        except Exception:
-            pass
+        if not _IS_WINDOWS_TERMINAL:
+            # Classic CMD only: Win32 API resize
+            try:
+                import ctypes
+                STD_OUT = ctypes.windll.kernel32.GetStdHandle(-11)
+                ctypes.windll.kernel32.SetConsoleScreenBufferSize(
+                    STD_OUT, w | (9999 << 16)
+                )
+                class SMALL_RECT(ctypes.Structure):
+                    _fields_ = [("Left", ctypes.c_short), ("Top", ctypes.c_short),
+                               ("Right", ctypes.c_short), ("Bottom", ctypes.c_short)]
+                rect = SMALL_RECT(0, 0, w - 1, h - 1)
+                ctypes.windll.kernel32.SetConsoleWindowInfo(STD_OUT, True, ctypes.byref(rect))
+            except Exception:
+                pass
     else:
         # ANSI resize works in Terminal.app (macOS) and most Linux terminals.
         mac_h = max(h - 2, 24) if ("darwin" in PLAT or "mac" in PLAT) else h
         sys.stdout.write(f"\033[8;{mac_h};{w}t")
         sys.stdout.flush()
     time.sleep(0.2)
+    # Adapt to actual terminal size (if resize didn't work or WT kept its own size)
+    try:
+        actual = shutil.get_terminal_size((w, h))
+        TERM_W = actual.columns
+        console._width = TERM_W
+    except Exception:
+        pass
 
 def _set_title(title="BadWords Setup"):
     """Set the terminal window title."""
@@ -609,8 +617,9 @@ def _log_print(tag, msg, tag_style, msg_style):
 # ── Scrollbar control (Windows CMD) ──────────────────────────
 def _set_scrollbar(enabled: bool):
     """Keep CMD scroll buffer always large so content is never lost.
-    The 'enabled' flag is kept for API compatibility but we never shrink the buffer."""
-    if os.name != "nt":
+    The 'enabled' flag is kept for API compatibility but we never shrink the buffer.
+    SKIP on Windows Terminal — SetConsoleScreenBufferSize breaks ConPTY pipe."""
+    if os.name != "nt" or _IS_WINDOWS_TERMINAL:
         return
     try:
         import ctypes
