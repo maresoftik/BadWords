@@ -1248,15 +1248,35 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         console.print()
         if not os.path.isdir(venv_dir):
             log_step(f"Creating virtual environment ({target_py})...")
+            _venv_ok = False
             try:
                 subprocess.run([target_py, "-m", "venv", venv_dir], check=True, capture_output=True)
-            except (subprocess.CalledProcessError, FileNotFoundError):
+                _venv_ok = True
+            except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+                pass
+
+            if not _venv_ok:
                 log_step("Built-in venv failed, trying virtualenv...")
-                subprocess.run([target_py, "-m", "pip", "install", "virtualenv", "--quiet"],
-                               check=True, capture_output=True)
-                subprocess.run([target_py, "-m", "virtualenv", venv_dir],
-                               check=True, capture_output=True)
-            log_ok("Virtual environment created.")
+                try:
+                    # Install virtualenv — try normal install first, then --user
+                    _vi = subprocess.run([target_py, "-m", "pip", "install", "virtualenv", "--quiet"],
+                                         capture_output=True)
+                    if _vi.returncode != 0:
+                        subprocess.run([target_py, "-m", "pip", "install", "virtualenv", "--user", "--quiet"],
+                                       capture_output=True)
+                    subprocess.run([target_py, "-m", "virtualenv", venv_dir],
+                                   check=True, capture_output=True)
+                    _venv_ok = True
+                except Exception as e:
+                    debug_log(f"virtualenv fallback also failed: {e}")
+
+            if _venv_ok:
+                log_ok("Virtual environment created.")
+            else:
+                log_err("Failed to create virtual environment.")
+                log_err("Please install Python 3.10+ from https://python.org and try again.")
+                pause()
+                return
         else:
             log_ok("Virtual environment already exists.")
 
