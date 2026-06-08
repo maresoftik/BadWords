@@ -71,9 +71,10 @@ PYTHON_BIN=""
 # Check cached PBS Python
 _find_cached_python() {
     local bin
-    bin=$(find "$PBS_DIR/bin" -name "python3*" -maxdepth 1 -type f -perm +111 2>/dev/null | sort -V | tail -1 || true)
+    # Look for python3 or python3.XX, but NOT python3.XX-config (compiler config script)
+    bin=$(find "$PBS_DIR/bin" -maxdepth 1 -type f -perm +111 \( -name "python3" -o -name "python3.[0-9]*" \) ! -name "*-config" ! -name "*.py" 2>/dev/null | sort -V | tail -1 || true)
     if [ -z "$bin" ]; then
-        bin=$(find "$PBS_DIR" -name "python3" -type f -perm +111 2>/dev/null | head -1 || true)
+        bin=$(find "$PBS_DIR" -maxdepth 3 -type f -perm +111 -name "python3" ! -name "*-config" 2>/dev/null | head -1 || true)
     fi
     echo "$bin"
 }
