@@ -1437,9 +1437,12 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
                     for hkey in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
                         try:
                             with winreg.OpenKey(hkey, r"SOFTWARE\Python\PythonCore") as key:
-                                if winreg.QueryInfoKey(key)[0] > 0:
-                                    found_in_reg = True
-                                    break
+                                num_subkeys = winreg.QueryInfoKey(key)[0]
+                                for i in range(num_subkeys):
+                                    subkey_name = winreg.EnumKey(key, i)
+                                    if subkey_name.startswith("3."):
+                                        found_in_reg = True
+                                        break
                         except OSError: pass
                 except Exception: pass
                 
@@ -1447,8 +1450,13 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
                     return True
                     
                 try:
-                    res = subprocess.run(["python", "-V"], capture_output=True, text=True, timeout=2)
-                    if "Python 3." in res.stdout or "Python 3." in res.stderr: return True
+                    import shutil, sys, subprocess
+                    sys_py = shutil.which("python")
+                    if sys_py:
+                        if os.path.normcase(os.path.abspath(sys.executable)) != os.path.normcase(os.path.abspath(sys_py)):
+                            res = subprocess.run([sys_py, "-V"], capture_output=True, text=True, timeout=2)
+                            if "Python 3." in res.stdout or "Python 3." in res.stderr: 
+                                return True
                 except Exception: pass
                 return False
 
