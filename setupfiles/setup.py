@@ -1432,12 +1432,20 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         if os.name == "nt":
             def _has_system_python():
                 import winreg
+                found_in_reg = False
                 try:
                     for hkey in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
                         try:
-                            with winreg.OpenKey(hkey, r"SOFTWARE\Python\PythonCore"): return True
+                            with winreg.OpenKey(hkey, r"SOFTWARE\Python\PythonCore") as key:
+                                if winreg.QueryInfoKey(key)[0] > 0:
+                                    found_in_reg = True
+                                    break
                         except OSError: pass
                 except Exception: pass
+                
+                if found_in_reg:
+                    return True
+                    
                 try:
                     res = subprocess.run(["python", "-V"], capture_output=True, text=True, timeout=2)
                     if "Python 3." in res.stdout or "Python 3." in res.stderr: return True
