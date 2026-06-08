@@ -923,6 +923,7 @@ else:
     existing_resolve_dirs = [d for d in resolve_dirs if _resolve_base_exists(d)]
     targets = existing_resolve_dirs if existing_resolve_dirs else [resolve_dirs[0]]
 
+    # Clean old wrappers from ALL script locations
     for rd in targets:
         scripts_dir = os.path.dirname(rd)
         if os.path.exists(scripts_dir):
@@ -933,6 +934,7 @@ else:
                         try: os.remove(p)
                         except: pass
 
+    # Write wrapper to ALL valid targets (not just the first one)
     wrapper_count = 0
     for rd in targets:
         try:
@@ -943,7 +945,6 @@ else:
             os.chmod(wp, 0o755)
             debug_log(f"Wrapper written to: {wp}")
             wrapper_count += 1
-            break
         except Exception as exc:
             debug_log(f"Could not write wrapper to {rd}: {exc}")
 
@@ -990,6 +991,23 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
 
     # Aggressively clean up old Inno Setup (Add/Remove Programs) leftovers
     _clean_legacy_inno_setup(install_dir)
+
+    # ── Write-access test (catch C:\Program Files etc. early) ──
+    try:
+        os.makedirs(install_dir, exist_ok=True)
+        _test_file = os.path.join(install_dir, ".bw_write_test")
+        with open(_test_file, "w") as f:
+            f.write("test")
+        os.remove(_test_file)
+    except PermissionError:
+        console.print()
+        log_err(f"Cannot write to: {install_dir}")
+        log_err("This directory requires administrator privileges.")
+        console.print(Text(f"{PAD}Please either:", style='white'), no_wrap=True)
+        console.print(Text(f"{PAD}  1. Run the installer as Administrator", style='cyan'), no_wrap=True)
+        console.print(Text(f"{PAD}  2. Use the default path (press Enter at path prompt)", style='cyan'), no_wrap=True)
+        pause()
+        return
 
     venv_dir  = os.path.join(install_dir, "venv")
     libs_link = os.path.join(install_dir, "libs")
@@ -1413,18 +1431,27 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         # ── DaVinci Resolve wrapper ───────────────────────────
         console.print()
         log_step("Configuring DaVinci Resolve integration...")
-        
+        debug_log(f"Resolve script dirs being checked: {resolve_dirs}")
+
         success = _create_davinci_wrappers(install_dir, resolve_dirs)
         if success:
             log_ok("DaVinci Resolve wrapper installed.")
+            # Show where wrappers were placed
+            for rd in resolve_dirs:
+                wp = os.path.join(rd, "BadWords.py")
+                if os.path.isfile(wp):
+                    log_info(f"  → {wp}")
         else:
             log_warn("Failed to write wrapper to any Resolve location.")
+            log_warn("Check Resolve → Workspace → Scripts after restart.")
 
 
-
-        with open(log_file, "a", encoding="utf-8"):
-            pass
-        os.chmod(log_file, 0o666)
+        try:
+            with open(log_file, "a", encoding="utf-8"):
+                pass
+            os.chmod(log_file, 0o666)
+        except Exception:
+            pass  # Protected directory — can't write log file, not fatal
 
         if force_main:
             try:
@@ -2258,9 +2285,17 @@ def main():
         except Exception as e:
             import traceback
             err_msg = traceback.format_exc()
-            debug_log(f"CRASH: {err_msg}")
-            log_err(f"An unexpected error occurred: {e}")
-            pause("Press Enter to exit...")
+            try:
+                debug_log(f"CRASH: {err_msg}")
+            except Exception:
+                pass
+            try:
+                log_err(f"An unexpected error occurred: {e}")
+                pause("Press Enter to exit...")
+            except Exception:
+                # Console pipe might be broken — fall back to plain print
+                print(f"\n[ERR] An unexpected error occurred: {e}")
+                input("Press Enter to exit...")
             _close_terminal()
 
 def _close_terminal():
