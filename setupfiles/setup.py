@@ -460,13 +460,12 @@ def _resize(w=TERM_W, h=TERM_H):
     IMPORTANT: On Windows Terminal (ConPTY), Win32 console API calls like
     SetConsoleScreenBufferSize / SetConsoleWindowInfo BREAK the pipe and
     cause every subsequent write to crash with WinError 233. We MUST skip
-    them when WT_SESSION is detected."""
-    global TERM_W
+    them when WT_SESSION is detected.  mode con is safe everywhere."""
     if os.name == "nt":
-        # mode con: safe on both classic CMD and WT (WT ignores it visually)
+        # mode con: works on classic CMD, also works on WT (resizes the buffer/tab)
         os.system(f"mode con cols={w} lines={h}")
         if not _IS_WINDOWS_TERMINAL:
-            # Classic CMD only: Win32 API resize
+            # Classic CMD only: Win32 API resize for extra reliability
             try:
                 import ctypes
                 STD_OUT = ctypes.windll.kernel32.GetStdHandle(-11)
@@ -486,13 +485,6 @@ def _resize(w=TERM_W, h=TERM_H):
         sys.stdout.write(f"\033[8;{mac_h};{w}t")
         sys.stdout.flush()
     time.sleep(0.2)
-    # Adapt to actual terminal size (if resize didn't work or WT kept its own size)
-    try:
-        actual = shutil.get_terminal_size((w, h))
-        TERM_W = actual.columns
-        console._width = TERM_W
-    except Exception:
-        pass
 
 def _set_title(title="BadWords Setup"):
     """Set the terminal window title."""
@@ -1324,7 +1316,7 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
             if spinner:
                 sp = Spinner(label).start()
             r = subprocess.run(
-                [venv_py, "-m", "pip"] + list(args),
+                [venv_py, "-m", "pip", "--no-cache-dir"] + list(args),
                 capture_output=True, text=True
             )
             ok = r.returncode == 0
@@ -1355,7 +1347,7 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
             for cu_tag in ("cu124", "cu121", "cu118"):
                 sp = Spinner(f"Installing PyTorch (CUDA {cu_tag})").start()
                 r = subprocess.run(
-                    [venv_py, "-m", "pip", "install", "torch", "torchaudio",
+                    [venv_py, "-m", "pip", "--no-cache-dir", "install", "torch", "torchaudio",
                      "--index-url", f"https://download.pytorch.org/whl/{cu_tag}", "-q"],
                     capture_output=True, text=True
                 )
