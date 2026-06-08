@@ -45,20 +45,9 @@ function Launch-Installer($PyExe, $InstallPy, $PkgDir) {
         $PyArg += " --local-repo `"$LocalRepo`""
     }
     $CmdLine = "set PYTHONPATH=$PkgDir&& `"$PyExe`" $PyArg"
-    $CmdArgs = "/c title BadWords Setup && mode con cols=88 lines=30 && $CmdLine"
-
-    # Prefer conhost.exe (classic CMD window) — it properly respects mode con sizing.
-    # On Windows 11, plain cmd.exe opens inside Windows Terminal which ignores mode con.
-    $conhost = Join-Path $env:SystemRoot "System32\conhost.exe"
-    if (Test-Path $conhost) {
-        Start-Process -FilePath $conhost `
-            -ArgumentList "cmd.exe $CmdArgs" `
-            -WindowStyle Normal
-    } else {
-        Start-Process -FilePath "cmd.exe" `
-            -ArgumentList $CmdArgs `
-            -WindowStyle Normal
-    }
+    Start-Process -FilePath "cmd.exe" `
+        -ArgumentList "/c title BadWords Setup && mode con cols=88 lines=30 && $CmdLine" `
+        -WindowStyle Normal
     exit 0
 }
 
