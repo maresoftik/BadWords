@@ -45,9 +45,20 @@ function Launch-Installer($PyExe, $InstallPy, $PkgDir) {
         $PyArg += " --local-repo `"$LocalRepo`""
     }
     $CmdLine = "set PYTHONPATH=$PkgDir&& `"$PyExe`" $PyArg"
-    Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c title BadWords Setup && mode con cols=88 lines=30 && $CmdLine" `
-        -WindowStyle Normal
+    $CmdArgs = "/c title BadWords Setup && mode con cols=88 lines=30 && $CmdLine"
+
+    $wt = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\wt.exe"
+    if (Test-Path $wt) {
+        # Windows 11 Terminal: force exact size on launch
+        Start-Process -FilePath $wt `
+            -ArgumentList "--size", "88,30", "cmd.exe", $CmdArgs `
+            -WindowStyle Normal
+    } else {
+        # Classic CMD fallback
+        Start-Process -FilePath "cmd.exe" `
+            -ArgumentList $CmdArgs `
+            -WindowStyle Normal
+    }
     exit 0
 }
 
