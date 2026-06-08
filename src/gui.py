@@ -2496,13 +2496,29 @@ class FramelessWindowMixin:
                     import ctypes
                     hwnd = int(self.winId())
                     if hwnd:
+                        # Reaplikacja stylów! Qt czasem resetuje natywne style podczas
+                        # zmian stanu (szczególnie max -> drag restore -> max na Win10).
+                        user32 = ctypes.windll.user32
+                        GWL_STYLE = -16
+                        style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+                        style |= 0x00040000  # WS_THICKFRAME
+                        style |= 0x00C00000  # WS_CAPTION
+                        style |= 0x00020000  # WS_MINIMIZEBOX
+                        style |= 0x00010000  # WS_MAXIMIZEBOX
+                        user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+
                         if was_max and not now_max:
                             # max→normal: DWM ma stary bufor (full-size) i renderuje go
                             # w mniejszym oknie → biały flash. DWMWA_CLOAK(13) ukrywa
                             # okno w DWM na czas przejścia.
                             val = ctypes.c_int(1)
                             ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 13, ctypes.byref(val), 4)
-                        ctypes.windll.user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0027)
+                        
+                        ctypes.windll.user32.SetWindowPos(
+                            hwnd, None, 0, 0, 0, 0, 
+                            0x0001 | 0x0002 | 0x0004 | 0x0020  # NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED
+                        )
+                        
                         if was_max and not now_max:
                             from PySide6.QtCore import QTimer
                             QTimer.singleShot(30, self._dwm_uncloak)
