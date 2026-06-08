@@ -938,6 +938,8 @@ else:
             os.chmod(wp, 0o755)
             debug_log(f"Wrapper written to: {wp}")
             wrapper_count += 1
+            break
+
         except Exception as exc:
             debug_log(f"Could not write wrapper to {rd}: {exc}")
 
@@ -1424,6 +1426,42 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         # ── DaVinci Resolve wrapper ───────────────────────────
         console.print()
         log_step("Configuring DaVinci Resolve integration...")
+
+        py_auto_installed = False
+
+        if os.name == "nt":
+            def _has_system_python():
+                import winreg
+                try:
+                    for hkey in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                        try:
+                            with winreg.OpenKey(hkey, r"SOFTWARE\Python\PythonCore"): return True
+                        except OSError: pass
+                except Exception: pass
+                try:
+                    res = subprocess.run(["python", "-V"], capture_output=True, text=True, timeout=2)
+                    if "Python 3." in res.stdout or "Python 3." in res.stderr: return True
+                except Exception: pass
+                return False
+
+            if not _has_system_python():
+                log_warn("System Python not detected. DaVinci Resolve requires it.")
+                sp_py = Spinner("Downloading & installing System Python 3.10 (background)...").start()
+                try:
+                    py_url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe"
+                    py_exe = os.path.join(tempfile.gettempdir(), "python_installer.exe")
+                    if download(py_url, py_exe):
+                        subprocess.run([py_exe, "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_test=0"], check=True)
+                        sp_py.done(ok=True)
+                        log_ok("System Python 3.10 installed successfully.")
+                        py_auto_installed = True
+                    else:
+                        sp_py.done(ok=False)
+                        log_warn("Failed to download Python installer.")
+                except Exception as e:
+                    sp_py.done(ok=False)
+                    log_warn(f"Failed to auto-install Python: {e}")
+
         debug_log(f"Resolve script dirs being checked: {resolve_dirs}")
 
         success = _create_davinci_wrappers(install_dir, resolve_dirs)
@@ -1462,7 +1500,15 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         console.print(Text(f"{PAD}   Mode : {mode_name}", style="green"), no_wrap=True)
         console.print(Text(f"{PAD}   Path : {install_dir}", style="green"), no_wrap=True)
         console.print(Text(f"{PAD}   Log  : {log_file}", style="green"), no_wrap=True)
-        console.print(Text(f"{PAD}   Find the script inside Davinci Resolve -> Workspace -> Scripts -> BadWords.", style="dim"), no_wrap=True)
+        console.print()
+        console.print(Text(f"{PAD}IMPORTANT FOR DAVINCI RESOLVE:", style="bold yellow"), no_wrap=True)
+        if py_auto_installed:
+            console.print(Text(f"{PAD}1. Python was installed in the background.", style="yellow"), no_wrap=True)
+            console.print(Text(f"{PAD}2. You MUST restart your computer for Resolve to detect it.", style="bold yellow"), no_wrap=True)
+            console.print(Text(f"{PAD}3. Find the script in: Workspace -> Scripts -> BadWords", style="yellow"), no_wrap=True)
+        else:
+            console.print(Text(f"{PAD}1. You MUST restart DaVinci Resolve.", style="yellow"), no_wrap=True)
+            console.print(Text(f"{PAD}2. Find the script in: Workspace -> Scripts -> BadWords", style="yellow"), no_wrap=True)
         console.print()
 
     finally:
