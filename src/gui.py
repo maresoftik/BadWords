@@ -2343,10 +2343,6 @@ class CustomTitleBar(QWidget):
             super().mouseMoveEvent(event)
             return
 
-        # Filtr drgań (tylko na start dragu)
-        if (event.position().toPoint() - self._click_pos).manhattanLength() < 5:
-            return
-
         win = self.window()
         self._is_dragging = False
         
@@ -2584,9 +2580,7 @@ class FramelessWindowMixin:
     def _setup_grips(self):
         self._grips = []
         edges = [
-            Qt.TopEdge, Qt.BottomEdge, Qt.LeftEdge, Qt.RightEdge, 
-            Qt.TopEdge | Qt.LeftEdge, 
-            Qt.TopEdge | Qt.RightEdge, 
+            Qt.BottomEdge, Qt.LeftEdge, Qt.RightEdge, 
             Qt.BottomEdge | Qt.LeftEdge, 
             Qt.BottomEdge | Qt.RightEdge
         ]
@@ -2614,12 +2608,9 @@ class FramelessWindowMixin:
             else:
                 if grip.isHidden(): grip.show()
 
-            if grip.edge == Qt.TopEdge: grip.setGeometry(b, 0, w - 2*b, b)
-            elif grip.edge == Qt.BottomEdge: grip.setGeometry(b, h - b, w - 2*b, b)
-            elif grip.edge == Qt.LeftEdge: grip.setGeometry(0, b, b, h - 2*b)
-            elif grip.edge == Qt.RightEdge: grip.setGeometry(w - b, b, b, h - 2*b)
-            elif grip.edge == (Qt.TopEdge | Qt.LeftEdge): grip.setGeometry(0, 0, b, b)
-            elif grip.edge == (Qt.TopEdge | Qt.RightEdge): grip.setGeometry(w - b, 0, b, b)
+            if grip.edge == Qt.BottomEdge: grip.setGeometry(b, h - b, w - 2*b, b)
+            elif grip.edge == Qt.LeftEdge: grip.setGeometry(0, 0, b, h - b)
+            elif grip.edge == Qt.RightEdge: grip.setGeometry(w - b, 0, b, h - b)
             elif grip.edge == (Qt.BottomEdge | Qt.LeftEdge): grip.setGeometry(0, h - b, b, b)
             elif grip.edge == (Qt.BottomEdge | Qt.RightEdge): grip.setGeometry(w - b, h - b, b, b)
 
@@ -2711,14 +2702,11 @@ class FramelessWindowMixin:
 
             if not self.isMaximized():
                 lx, rx = pos.x() < b, pos.x() > w - b
-                ty, by = pos.y() < b, pos.y() > h - b
-                if ty and lx: return True, 13  # HTTOPLEFT
-                if ty and rx: return True, 14  # HTTOPRIGHT
+                by = pos.y() > h - b
                 if by and lx: return True, 16  # HTBOTTOMLEFT
                 if by and rx: return True, 17  # HTBOTTOMRIGHT
                 if lx:        return True, 10  # HTLEFT
                 if rx:        return True, 11  # HTRIGHT
-                if ty:        return True, 12  # HTTOP
                 if by:        return True, 15  # HTBOTTOM
 
             _tb = getattr(self, '_title_bar', getattr(self, '_tb', None))
