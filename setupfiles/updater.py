@@ -197,7 +197,7 @@ def main():
 
     if os.path.isfile(venv_pip):
         info("Upgrading pip packages...")
-        r = subprocess.run([venv_pip, "install", "--upgrade", "faster-whisper", "stable-ts", "pypdf", "PySideSix-Frameless-Window"], 
+        r = subprocess.run([venv_pip, "install", "--upgrade", "faster-whisper", "stable-ts", "pypdf"], 
                            capture_output=True, text=True)
         for line in r.stdout.splitlines():
             if "Requirement already" not in line:
