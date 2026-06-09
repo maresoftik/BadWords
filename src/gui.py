@@ -2343,64 +2343,17 @@ class CustomTitleBar(QWidget):
             super().mouseMoveEvent(event)
             return
 
-        win = self.window()
-        gp = event.globalPosition().toPoint()
-        frames = getattr(self, '_x11_detach_frames', 0)
-
         # Filtr drgań (tylko na start dragu)
-        if frames == 0 and (event.position().toPoint() - self._click_pos).manhattanLength() < 5:
+        if (event.position().toPoint() - self._click_pos).manhattanLength() < 5:
             return
 
-        if win.isMaximized() and frames == 0:
-            is_wayland = getattr(self._win, '_is_wayland', False)
-            is_win = getattr(self._win, '_is_win', False)
-            if is_wayland or is_win:
-                self._is_dragging = False
-                if not is_win:
-                    win.showNormal()
-                    win.resize(580, 670)
-                if hasattr(win, 'windowHandle') and win.windowHandle():
-                    win.windowHandle().startSystemMove()
-                event.accept()
-                return
-            else:
-                # X11 OUT OF THE BOX FIX:
-                ratio = self._click_pos.x() / max(1, self.width())
-                saved_geo = getattr(win, '_pre_max_geometry', None)
-                new_w = saved_geo.width() if saved_geo and saved_geo.isValid() else 580
-                new_h = saved_geo.height() if saved_geo and saved_geo.isValid() else 670
-                
-                offset_x = int(new_w * ratio)
-                offset_y = min(self._click_pos.y(), self.height())
-                
-                new_x = gp.x() - offset_x
-                new_y = gp.y() - offset_y
-
-                win.showNormal()
-                win.setGeometry(new_x, new_y, new_w, new_h)
-
-                self._x11_detach_frames = 5
-                self._cached_offset_x = offset_x
-                self._cached_offset_y = offset_y
-                event.accept()
-                return
-
-        if frames > 0:
-            self._x11_detach_frames -= 1
-            
-            new_x = gp.x() - self._cached_offset_x
-            new_y = gp.y() - self._cached_offset_y
-            win.move(new_x, new_y)
-
-            if self._x11_detach_frames == 0:
-                self._is_dragging = False
-                if hasattr(win, 'windowHandle') and win.windowHandle():
-                    win.windowHandle().startSystemMove()
-
-            event.accept()
-            return
-
+        win = self.window()
         self._is_dragging = False
+        
+        # Native window dragging
+        # Modern Window Managers (DWM, Mutter, KWin, Wayland) natively un-maximize 
+        # the window if startSystemMove is called while maximized, providing seamless 
+        # cursor proportional attachment and edge-snapping (Aero Snap) out of the box.
         if hasattr(win, 'windowHandle') and win.windowHandle():
             win.windowHandle().startSystemMove()
 
@@ -2408,7 +2361,6 @@ class CustomTitleBar(QWidget):
 
     def mouseReleaseEvent(self, event):
         self._is_dragging = False
-        self._x11_detach_frames = 0
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):
