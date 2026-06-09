@@ -2440,16 +2440,14 @@ class FramelessWindowMixin:
 
         if self._is_win:
             if self._is_root:
-                if not _HAS_QFRAMELESS:
-                    # Root window: FramelessWindowHint eliminuje CAŁĄ NC area — DWM nie
-                    # rysuje żadnych system buttonów (koniec z "Win98 button" artefaktem).
-                    # Shadow i animacje odzyskujemy przez SetWindowLong(WS_THICKFRAME|WS_CAPTION)
-                    # w showEvent + DwmExtendFrameIntoClientArea.
-                    self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+                # Root window: FramelessWindowHint eliminuje CAŁĄ NC area — DWM nie
+                # rysuje żadnych system buttonów (koniec z "Win98 button" artefaktem).
+                # Shadow i animacje odzyskujemy przez SetWindowLong(WS_THICKFRAME|WS_CAPTION)
+                # w showEvent + DwmExtendFrameIntoClientArea.
+                self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
             else:
                 # Popups are genuinely frameless — translucency is safe here.
-                if not _HAS_QFRAMELESS:
-                    self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.Dialog | Qt.NoDropShadowWindowHint)
+                self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.Dialog | Qt.NoDropShadowWindowHint)
                 self.setAttribute(Qt.WA_TranslucentBackground, True)
         elif self._is_mac and self._is_root:
             # macOS root window: use native title bar with traffic lights.
@@ -2552,9 +2550,7 @@ class FramelessWindowMixin:
                     style |= 0x00C00000  # WS_CAPTION
                     style |= 0x00020000  # WS_MINIMIZEBOX
                     style |= 0x00010000  # WS_MAXIMIZEBOX
-                    user32.SetWindowLongW(hwnd, GWL_STYLE, style)
-
-                    # 2. Wymuszenie renderowania NC przez DWM (shadow)
+                # 2. Wymuszenie renderowania NC przez DWM (shadow)
                     # DWMWA_NCRENDERING_POLICY=2, DWMNCRP_ENABLED=2
                     nc_policy = ctypes.c_int(2)
                     dwmapi.DwmSetWindowAttribute(hwnd, 2, ctypes.byref(nc_policy), 4)
@@ -2572,8 +2568,9 @@ class FramelessWindowMixin:
                         hwnd, None, 0, 0, 0, 0,
                         0x0001 | 0x0002 | 0x0004 | 0x0020  # NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED
                     )
-                elif hwnd and not getattr(self, '_is_root', False):
-                    # Popupy: DWMWCP_DONOTROUND
+                if hwnd:
+                    # ALL windows (root & popups): DWMWCP_DONOTROUND
+                    # Removes Windows 11 rounded corners and the default 1px gray border
                     corner_pref = ctypes.c_int(1)
                     ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_pref), 4)
             except Exception:
@@ -2709,7 +2706,14 @@ class FramelessWindowMixin:
             y = (msg.lParam >> 16) & 0xFFFF
             if y & 0x8000: y -= 0x10000
 
-            pos = self.mapFromGlobal(QPoint(x, y))
+            # HighDPI FIX: x and y from WM_NCHITTEST are physical pixels!
+            # mapFromGlobal expects logical pixels in PySide6.
+            ratio = self.devicePixelRatioF()
+            logical_x = x / ratio
+            logical_y = y / ratio
+
+            from PySide6.QtCore import QPointF
+            pos = self.mapFromGlobal(QPointF(logical_x, logical_y).toPoint())
             w, h = self.width(), self.height()
             b = self._RESIZE_BORDER
 
@@ -2731,7 +2735,7 @@ class FramelessWindowMixin:
                 child = self.childAt(pos)
 
                 if not child or not child.inherits("QPushButton"):
-                    return True, 2  # HTCAPTION
+                    return True, 1  # HTCLIENT
 
             return True, 1  # HTCLIENT
 
