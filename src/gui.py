@@ -2220,9 +2220,9 @@ class CustomTitleBar(QWidget):
             os.path.join(_assets_dir, "exit.png"),
             "btn_close",    lang, parent=self)
 
-        self.btn_min.clicked.connect(lambda: self._win.showMinimized())
+        self.btn_min.clicked.connect(self._minimize_window)
         self.btn_max.clicked.connect(self._toggle_maximize)
-        self.btn_close.clicked.connect(self._win.close)
+        self.btn_close.clicked.connect(self._close_window)
 
         for btn in (self.btn_min, self.btn_max, self.btn_close):
             lay.addWidget(btn)
@@ -2276,12 +2276,48 @@ class CustomTitleBar(QWidget):
         self.btn_max.setIconSize(QSize(14, 14))
 
     # ── helpers ───────────────────────────────────────────────────────────────
+    def _minimize_window(self):
+        win = self.window()
+        if getattr(win, '_is_win', False):
+            try:
+                import ctypes
+                ctypes.windll.user32.PostMessageW(int(win.winId()), 0x0112, 0xF020, 0) # SC_MINIMIZE
+                return
+            except Exception:
+                pass
+        win.showMinimized()
+
+    def _close_window(self):
+        win = self.window()
+        if getattr(win, '_is_win', False):
+            try:
+                import ctypes
+                ctypes.windll.user32.PostMessageW(int(win.winId()), 0x0112, 0xF060, 0) # SC_CLOSE
+                return
+            except Exception:
+                pass
+        win.close()
+
     def _toggle_maximize(self):
         # Zapis/odczyt stanu przed maksymalizacją, aby przycisk "windowed"
         # przywracał dokładny poprzedni rozmiar i położenie.
         win = self.window()
         if not getattr(win, '_is_root', False):
             return
+
+        if getattr(win, '_is_win', False):
+            try:
+                import ctypes
+                hwnd = int(win.winId())
+                if win.isMaximized():
+                    ctypes.windll.user32.PostMessageW(hwnd, 0x0112, 0xF120, 0) # SC_RESTORE
+                else:
+                    win._pre_max_geometry = win.geometry()
+                    ctypes.windll.user32.PostMessageW(hwnd, 0x0112, 0xF030, 0) # SC_MAXIMIZE
+                return
+            except Exception:
+                pass
+
         if win.isMaximized():
             win.showNormal()
             saved_geo = getattr(win, '_pre_max_geometry', None)
@@ -2665,7 +2701,7 @@ class FramelessWindowMixin:
                 params[0].top    += border
                 params[0].right  -= border
                 params[0].bottom -= border
-            return True, 0
+            return True, (0x0300 if msg.wParam else 0)  # WVR_REDRAW
 
         # ── WM_ENTERSIZEMOVE (0x0231) ─────────────────────────────────────────
         # Fires at the start of every drag or resize. Forces DWM to flush our
