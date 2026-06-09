@@ -1455,6 +1455,12 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
             _pip_run("install", "PySide6", "-q", label="Installing PySide6 GUI library")
         else:
             log_info("PySide6 already installed.")
+
+        qframeless_ok = subprocess.run([venv_py, "-c", "import qframelesswindow"], capture_output=True).returncode == 0
+        if not qframeless_ok:
+            _pip_run("install", "PySideSix-Frameless-Window", "-q", label="Installing qframelesswindow (Windows Native CSD)")
+        else:
+            log_info("qframelesswindow already installed.")
         log_ok("All dependencies installed.")
 
         # ── Libs symlink ──────────────────────────────────────
@@ -1927,6 +1933,8 @@ def option_move():
              "install", "faster-whisper", "stable-ts", "pypdf", "-q")
         if subprocess.run([venv_py, "-c", "import PySide6"], capture_output=True).returncode != 0:
             _pip("Installing PySide6", "install", "PySide6", "-q")
+        if subprocess.run([venv_py, "-c", "import qframelesswindow"], capture_output=True).returncode != 0:
+            _pip("Installing qframelesswindow", "install", "PySideSix-Frameless-Window", "-q")
         log_ok("Dependencies installed.")
 
     # ── Step 3: Recreate libs symlink ────────────────────────
