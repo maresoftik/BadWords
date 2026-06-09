@@ -2606,9 +2606,13 @@ class FramelessWindowMixin:
                     )
                 if hwnd:
                     # ALL windows (root & popups): DWMWCP_DONOTROUND
-                    # Removes Windows 11 rounded corners and the default 1px gray border
+                    # Removes Windows 11 rounded corners
                     corner_pref = ctypes.c_int(1)
                     ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_pref), 4)
+
+                    # Remove Windows 11 1px accent border completely (DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE)
+                    border_color = ctypes.c_uint(0xFFFFFFFE)
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border_color), 4)
             except Exception:
                 pass
         if hasattr(self, '_grips'):
