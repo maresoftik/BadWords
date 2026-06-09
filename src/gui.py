@@ -49,6 +49,28 @@ import config
 import osdoc
 
 # ==========================================
+# QFRAMELESSWINDOW — NATIVE CSD LIBRARY
+# ==========================================
+# On Windows, use the battle-tested qframelesswindow library for proper
+# Aero Snap, DWM shadows, resize, drag-detach, and snap layouts.
+# Linux/macOS keep the existing manual code (it works fine there).
+_HAS_QFRAMELESS = False
+_QFramelessMainWindow = None
+_QFramelessDialog = None
+
+if platform.system() == "Windows":
+    try:
+        from qframelesswindow import FramelessMainWindow as _QFramelessMainWindow
+        from qframelesswindow import FramelessDialog as _QFramelessDialog
+        from qframelesswindow.titlebar import TitleBarBase as _QTitleBarBase
+        _HAS_QFRAMELESS = True
+    except ImportError:
+        _QTitleBarBase = None
+
+_BaseMainWindow = _QFramelessMainWindow if _HAS_QFRAMELESS else QMainWindow
+_BaseDialog = _QFramelessDialog if _HAS_QFRAMELESS else QDialog
+
+# ==========================================
 # MACOS UI SCALE MONKEY PATCH
 # ==========================================
 _orig_set_style_sheet = QWidget.setStyleSheet
@@ -2143,11 +2165,12 @@ class CustomTitleBar(QWidget):
     • Dragging  → QWindow.startSystemMove()  (native OS behaviour)
     • Dbl-click → toggle maximized             (native OS behaviour)
 
-    Windows
-    -------
-    Dragging and maximise toggles are handled by FramelessWindowMixin via
-    WM_NCHITTEST returning HTCAPTION, so mousePressEvent / mouseDoubleClick
-    are NO-OPs on Windows (the mixin intercepts them at the native level).
+    Windows (with qframelesswindow library)
+    ----------------------------------------
+    • Dragging  → win32gui.ReleaseCapture + WM_SYSCOMMAND SC_MOVE|HTCAPTION
+                  (full Aero Snap, drag-detach from maximized, snap layouts)
+    • Dbl-click → toggle maximized via WM_SYSCOMMAND SC_MAXIMIZE/SC_RESTORE
+    • Resize    → handled by library's nativeEvent (WM_NCHITTEST border edges)
     """
 
     def __init__(self, window: QWidget, lang: str, parent=None):
@@ -2265,12 +2288,37 @@ class CustomTitleBar(QWidget):
         self.btn_max.setIconSize(QSize(14, 14))
 
     # ── helpers ───────────────────────────────────────────────────────────────
+    def _isDragRegion(self, pos):
+        """Check if pos is in the draggable region (i.e. not on a button)."""
+        for btn in (self.btn_min, self.btn_max, self.btn_close):
+            if btn.isVisible() and btn.geometry().contains(pos):
+                return False
+        # Also exclude the chapter dropdown if visible
+        if hasattr(self, 'chapter_dropdown') and self.chapter_dropdown.isVisible():
+            if self.chapter_dropdown.geometry().contains(pos):
+                return False
+        return True
+
     def _toggle_maximize(self):
         # Zapis/odczyt stanu przed maksymalizacją, aby przycisk "windowed"
         # przywracał dokładny poprzedni rozmiar i położenie.
         win = self._win
         if not getattr(win, '_is_root', False):
             return
+        if _HAS_QFRAMELESS and getattr(win, '_is_win', False):
+            # On Windows with library: use WM_SYSCOMMAND for native maximize/restore
+            # This ensures proper DWM animations and Aero Snap state tracking.
+            try:
+                import win32gui, win32con
+                hwnd = int(win.winId())
+                if win.isMaximized():
+                    win32gui.PostMessage(hwnd, win32con.WM_SYSCOMMAND, win32con.SC_RESTORE, 0)
+                else:
+                    win._pre_max_geometry = win.geometry()
+                    win32gui.PostMessage(hwnd, win32con.WM_SYSCOMMAND, win32con.SC_MAXIMIZE, 0)
+                return
+            except ImportError:
+                pass
         if win.isMaximized():
             win.showNormal()
             saved_geo = getattr(win, '_pre_max_geometry', None)
@@ -2284,10 +2332,27 @@ class CustomTitleBar(QWidget):
                 win.showMaximized()
 
     def mousePressEvent(self, event):
-        # Windows root window: OS handles dragging via HTCAPTION in nativeEvent.
-        if getattr(self._win, '_is_win', False) and getattr(self._win, '_is_root', False):
-            event.ignore()
+        if _HAS_QFRAMELESS and getattr(self._win, '_is_win', False):
+            # Windows + qframelesswindow: use library's native startSystemMove
+            # via WM_SYSCOMMAND. This is the key to proper Aero Snap behavior.
+            if event.button() == Qt.LeftButton and self._isDragRegion(event.position().toPoint()):
+                try:
+                    import win32gui, win32con, win32api
+                    win32gui.ReleaseCapture()
+                    win32api.SendMessage(
+                        int(self._win.winId()),
+                        win32con.WM_SYSCOMMAND,
+                        win32con.SC_MOVE | win32con.HTCAPTION,
+                        0
+                    )
+                    event.accept()
+                    return
+                except ImportError:
+                    pass
+            super().mousePressEvent(event)
             return
+
+        # Linux / macOS: manual drag with startSystemMove()
         if event.button() == Qt.LeftButton:
             self._is_dragging = True
             self._click_pos = event.position().toPoint()
@@ -2296,8 +2361,10 @@ class CustomTitleBar(QWidget):
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if getattr(self._win, '_is_win', False) and getattr(self._win, '_is_root', False):
-            event.ignore()
+        if _HAS_QFRAMELESS and getattr(self._win, '_is_win', False):
+            # Windows: drag is handled by WM_SYSCOMMAND in mousePressEvent,
+            # so mouseMoveEvent is a no-op (OS controls the window movement).
+            super().mouseMoveEvent(event)
             return
 
         if not getattr(self, '_is_dragging', False):
@@ -2376,8 +2443,8 @@ class CustomTitleBar(QWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event):
-        if getattr(self._win, '_is_win', False) and getattr(self._win, '_is_root', False):
-            event.ignore()
+        if _HAS_QFRAMELESS and getattr(self._win, '_is_win', False):
+            super().mouseReleaseEvent(event)
             return
         self._is_dragging = False
         self._x11_detach_frames = 0
@@ -2385,11 +2452,8 @@ class CustomTitleBar(QWidget):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
-            # On Windows root it's handled by OS double-click on HTCAPTION.
-            if getattr(self._win, '_is_win', False) and getattr(self._win, '_is_root', False):
-                event.ignore()
-                return
-            self._toggle_maximize()
+            if self._isDragRegion(event.position().toPoint()):
+                self._toggle_maximize()
         super().mouseDoubleClickEvent(event)
 
 
@@ -2421,7 +2485,7 @@ class FramelessWindowMixin:
 
     Usage
     -----
-        class MyWindow(FramelessWindowMixin, QMainWindow):
+        class MyWindow(FramelessWindowMixin, _BaseMainWindow):
             def __init__(self):
                 super().__init__()
                 self.frameless_init(is_popup=False)
@@ -2452,14 +2516,16 @@ class FramelessWindowMixin:
 
         if self._is_win:
             if self._is_root:
-                # Root window: FramelessWindowHint eliminuje CAŁĄ NC area — DWM nie
-                # rysuje żadnych system buttonów (koniec z "Win98 button" artefaktem).
-                # Shadow i animacje odzyskujemy przez SetWindowLong(WS_THICKFRAME|WS_CAPTION)
-                # w showEvent + DwmExtendFrameIntoClientArea.
-                self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+                if not _HAS_QFRAMELESS:
+                    # Root window: FramelessWindowHint eliminuje CAŁĄ NC area — DWM nie
+                    # rysuje żadnych system buttonów (koniec z "Win98 button" artefaktem).
+                    # Shadow i animacje odzyskujemy przez SetWindowLong(WS_THICKFRAME|WS_CAPTION)
+                    # w showEvent + DwmExtendFrameIntoClientArea.
+                    self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
             else:
                 # Popups are genuinely frameless — translucency is safe here.
-                self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.Dialog | Qt.NoDropShadowWindowHint)
+                if not _HAS_QFRAMELESS:
+                    self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.Dialog | Qt.NoDropShadowWindowHint)
                 self.setAttribute(Qt.WA_TranslucentBackground, True)
         elif self._is_mac and self._is_root:
             # macOS root window: use native title bar with traffic lights.
@@ -2491,7 +2557,7 @@ class FramelessWindowMixin:
             was_max = getattr(self, '_was_maximized', False)
             now_max = self.isMaximized()
 
-            if getattr(self, '_is_win', False) and getattr(self, '_is_root', False):
+            if not _HAS_QFRAMELESS and getattr(self, '_is_win', False) and getattr(self, '_is_root', False):
                 try:
                     import ctypes
                     hwnd = int(self.winId())
@@ -2541,7 +2607,7 @@ class FramelessWindowMixin:
 
     def showEvent(self, event):
         super().showEvent(event)
-        if getattr(self, '_is_win', False):
+        if not _HAS_QFRAMELESS and getattr(self, '_is_win', False):
             try:
                 import ctypes
                 hwnd = int(self.winId())
@@ -2646,6 +2712,9 @@ class FramelessWindowMixin:
 
     # ── Windows WM_NCHITTEST ──────────────────────────────────────────────────
     def nativeEvent(self, eventType, message):
+        if _HAS_QFRAMELESS and getattr(self, '_is_win', False):
+            return super().nativeEvent(eventType, message)
+
         if not getattr(self, '_is_win', False) or not getattr(self, '_is_root', False) or eventType != b"windows_generic_MSG":
             return super().nativeEvent(eventType, message)
 
@@ -2757,7 +2826,7 @@ class FramelessWindowMixin:
 # CLASS 1: SPLASH SCREEN
 # ==========================================
 
-class SplashScreen(FramelessWindowMixin, QDialog):
+class SplashScreen(FramelessWindowMixin, _BaseDialog):
     """
     Frameless, dark loading window displayed while engine/api are initializing.
     Shows an animated "loading…" label (0-3 cycling dots at 400 ms).
@@ -2952,7 +3021,7 @@ class _LangPickerDialog(QDialog):
         self.close()
 
 
-class TelemetryPopup(FramelessWindowMixin, QDialog):
+class TelemetryPopup(FramelessWindowMixin, _BaseDialog):
     """
     Modal dialog asking the user for analytics consent.
 
@@ -3075,6 +3144,8 @@ class TelemetryPopup(FramelessWindowMixin, QDialog):
 
         # --- Custom title bar ---
         self._tb = CustomTitleBar(self, self._lang, parent=self.inner_frame)
+        if _HAS_QFRAMELESS and getattr(self, '_is_win', False) and hasattr(self, 'setTitleBar'):
+            self.setTitleBar(self._tb)
         self._tb.btn_min.hide()
         self._tb.btn_max.hide()
         if hasattr(self._tb, '_lbl_title'):
@@ -4218,7 +4289,7 @@ class SearchableDropdown(QPushButton):
         return self.text()
 
 
-class CustomMsgBox(FramelessWindowMixin, QDialog):
+class CustomMsgBox(FramelessWindowMixin, _BaseDialog):
     def __init__(self, parent, title: str, message: str, btn_yes_text: str, btn_no_text: str = None):
         super().__init__(parent)
         from PySide6.QtCore import Qt
@@ -4266,6 +4337,8 @@ class CustomMsgBox(FramelessWindowMixin, QDialog):
         root_layout.setContentsMargins(0, 0, 0, 0)
         
         self._tb = CustomTitleBar(self, "en", parent=self.inner_frame)
+        if _HAS_QFRAMELESS and getattr(self, '_is_win', False) and hasattr(self, 'setTitleBar'):
+            self.setTitleBar(self._tb)
         self._tb.btn_min.hide()
         self._tb.btn_max.hide()
         root_layout.addWidget(self._tb)
@@ -4465,7 +4538,7 @@ class UpdateCheckThread(QThread):
 
 
 
-class UpdateNotifyDialog(FramelessWindowMixin, QDialog):
+class UpdateNotifyDialog(FramelessWindowMixin, _BaseDialog):
     """
     Custom frameless update-notification dialog.
 
@@ -4554,6 +4627,8 @@ class UpdateNotifyDialog(FramelessWindowMixin, QDialog):
         root.setSpacing(0)
 
         self._tb = CustomTitleBar(self, lang, parent=self.inner_frame)
+        if _HAS_QFRAMELESS and getattr(self, '_is_win', False) and hasattr(self, 'setTitleBar'):
+            self.setTitleBar(self._tb)
         self._tb.btn_min.hide()
         self._tb.btn_max.hide()
         root.addWidget(self._tb)
@@ -4778,7 +4853,7 @@ class UpdateNotifyDialog(FramelessWindowMixin, QDialog):
 
 
 
-class MarkerDialog(FramelessWindowMixin, QDialog):
+class MarkerDialog(FramelessWindowMixin, _BaseDialog):
 
     """
     Custom frameless dialog for adding or editing a custom marker.
@@ -4847,6 +4922,8 @@ class MarkerDialog(FramelessWindowMixin, QDialog):
         root_layout.setSpacing(0)
 
         self._tb = CustomTitleBar(self, lang, parent=self.inner_frame)
+        if _HAS_QFRAMELESS and getattr(self, '_is_win', False) and hasattr(self, 'setTitleBar'):
+            self.setTitleBar(self._tb)
         self._tb.btn_min.hide()
         self._tb.btn_max.hide()
         title_text = _txt(lang, title_key)
@@ -4940,7 +5017,7 @@ class MarkerDialog(FramelessWindowMixin, QDialog):
 
 
 
-class UnsavedChangesDialog(FramelessWindowMixin, QDialog):
+class UnsavedChangesDialog(FramelessWindowMixin, _BaseDialog):
 
     def __init__(self, parent, diff_dict, key_name_map):
         super().__init__(parent)
@@ -4979,6 +5056,8 @@ class UnsavedChangesDialog(FramelessWindowMixin, QDialog):
         root_layout.setContentsMargins(0, 0, 0, 0)
         
         self._tb = CustomTitleBar(self, "en", parent=self.inner_frame)
+        if _HAS_QFRAMELESS and getattr(self, '_is_win', False) and hasattr(self, 'setTitleBar'):
+            self.setTitleBar(self._tb)
         self._tb.btn_min.hide()
         self._tb.btn_max.hide()
         root_layout.addWidget(self._tb)
@@ -5078,7 +5157,7 @@ class UnsavedChangesDialog(FramelessWindowMixin, QDialog):
         self.accept()
 
 
-class SettingsDialog(FramelessWindowMixin, QDialog):
+class SettingsDialog(FramelessWindowMixin, _BaseDialog):
     """Settings Dialog — left category menu + right stacked pages.
     All I/O goes through engine.load_preferences / engine.save_preferences
     which delegate to osdoc's smart router.
@@ -5257,6 +5336,8 @@ class SettingsDialog(FramelessWindowMixin, QDialog):
         outer_layout.setSpacing(0)
         
         self._tb = CustomTitleBar(self, prefs.get("gui_lang", "en"), parent=self.inner_frame)
+        if _HAS_QFRAMELESS and getattr(self, '_is_win', False) and hasattr(self, 'setTitleBar'):
+            self.setTitleBar(self._tb)
         # Manually force the title into toolbars that normally get theirs from windowTitle()
         if hasattr(self._tb, "_lbl_title"):
             self._tb._lbl_title.setText(self.txt("tool_settings"))
@@ -7349,7 +7430,7 @@ class SettingsDialog(FramelessWindowMixin, QDialog):
 # CLASS 3: MAIN APPLICATION WINDOW
 # ==========================================
 
-class BadWordsGUI(FramelessWindowMixin, QMainWindow):
+class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
     """
     Stage 3 — QMainWindow implementing the "VS Code" unified workspace:
       - Opens maximized on the monitor under the cursor
@@ -7450,6 +7531,8 @@ class BadWordsGUI(FramelessWindowMixin, QMainWindow):
 
         # ── CSD: custom title bar ───────────────────────────────────────
         self._title_bar = CustomTitleBar(self, self.lang, parent=self._root_frame)
+        if _HAS_QFRAMELESS and getattr(self, '_is_win', False) and hasattr(self, 'setTitleBar'):
+            self.setTitleBar(self._title_bar)
         self._title_bar.chapter_dropdown.valueChanged.connect(self._switch_chapter)
         self._root_layout.addWidget(self._title_bar)
 
