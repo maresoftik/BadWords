@@ -148,7 +148,7 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 
 # -- 2. Install rich to temp ----------------------------------
-step "Installing dependencies (rich)..."
+step "Installing dependencies..."
 PKG_DIR="$BW_TMP/packages"
 mkdir -p "$PKG_DIR"
 "$PYTHON_BIN" -m pip install rich --target "$PKG_DIR" --quiet 2>/dev/null \
