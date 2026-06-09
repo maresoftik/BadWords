@@ -124,7 +124,7 @@ if ($NeedDownload) {
 }
 
 # -- 2. Install rich to temp ----------------------------------
-step "Installing dependencies (rich)..."
+step "Installing dependencies..."
 $PkgDir = Join-Path $BW_TMP "packages"
 New-Item -ItemType Directory -Path $PkgDir -Force | Out-Null
 & $EmbedPyExe -m pip install rich --target $PkgDir --quiet 2>$null | Out-Null
