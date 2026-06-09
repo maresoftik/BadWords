@@ -957,6 +957,7 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
 
     resolve_dirs = _resolve_script_dirs()
     default_dir  = _default_install_dir()
+    py_auto_installed = False
 
     if preset_path:
         # Path was chosen upstream (e.g. by option_reset) — skip detect & prompt
@@ -1130,6 +1131,22 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         protected_dirs  = {"models", "saves", "venv", "bin", "libs"}
         src_list = [s for s in [source_path, assets_path] if s and os.path.isdir(s)]
         is_update = os.path.isdir(venv_dir)
+        
+        if is_update:
+            # Check if existing venv is broken (e.g. system python uninstalled)
+            venv_py_test = os.path.join(venv_dir, "Scripts" if os.name == "nt" else "bin", "python.exe" if os.name == "nt" else "python")
+            broken_venv = True
+            if os.path.isfile(venv_py_test):
+                try:
+                    if subprocess.run([venv_py_test, "-V"], capture_output=True, timeout=2).returncode == 0:
+                        broken_venv = False
+                except Exception: pass
+            
+            if broken_venv:
+                log_warn("Existing virtual environment is broken (base Python missing). It will be recreated.")
+                shutil.rmtree(venv_dir, ignore_errors=True)
+                is_update = False
+
         if is_update:
             two_way_sync(src_list, install_dir, protected_files, protected_dirs)
         else:
@@ -1237,6 +1254,69 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
                         except Exception: pass
                 else:
                     log_warn("FFmpeg download failed. App may not work without it.")
+
+        # ── System Python Check ───────────────────────────────
+        if os.name == "nt":
+            def _has_system_python():
+                import winreg
+                found_in_reg = False
+                try:
+                    for hkey in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                        try:
+                            with winreg.OpenKey(hkey, r"SOFTWARE\Python\PythonCore") as key:
+                                num_subkeys = winreg.QueryInfoKey(key)[0]
+                                for i in range(num_subkeys):
+                                    subkey_name = winreg.EnumKey(key, i)
+                                    if subkey_name.startswith("3."):
+                                        found_in_reg = True
+                                        break
+                        except OSError: pass
+                except Exception: pass
+                
+                if found_in_reg:
+                    return True
+                    
+                try:
+                    import shutil, sys, subprocess
+                    sys_py = shutil.which("python") or shutil.which("python3")
+                    if sys_py:
+                        res = subprocess.run([sys_py, "-V"], capture_output=True, text=True, timeout=2)
+                        if "Python 3." in res.stdout or "Python 3." in res.stderr: 
+                            return True
+                except Exception: pass
+                return False
+
+            if not _has_system_python():
+                console.print()
+                log_warn("System Python not detected. DaVinci Resolve requires it.")
+                sp_py = Spinner("Downloading & installing System Python 3.10...").start()
+                try:
+                    py_url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe"
+                    py_exe = os.path.join(tempfile.gettempdir(), "python_installer.exe")
+                    if download(py_url, py_exe):
+                        res = subprocess.run([py_exe, "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_test=0", "Include_launcher=0"])
+                        if res.returncode in (0, 1641, 3010):
+                            sp_py.done(ok=True)
+                            log_ok("System Python 3.10 installed successfully.")
+                            py_auto_installed = True
+                            
+                            # Add to current process PATH so venv creation can find it
+                            new_py_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python310")
+                            os.environ["PATH"] = new_py_dir + os.pathsep + os.path.join(new_py_dir, "Scripts") + os.pathsep + os.environ.get("PATH", "")
+                            
+                            try:
+                                with open(os.path.join(install_dir, ".python_auto_installed"), "w") as f:
+                                    f.write("1")
+                            except Exception: pass
+                        else:
+                            sp_py.done(ok=False)
+                            log_warn(f"Failed to auto-install Python: exit code {res.returncode}")
+                    else:
+                        sp_py.done(ok=False)
+                        log_warn("Failed to download Python installer.")
+                except Exception as e:
+                    sp_py.done(ok=False)
+                    log_warn(f"Failed to auto-install Python: {e}")
 
         # ── Python for venv ───────────────────────────────────
         # The bootstrap Python (from the bootstrapper) may be embedded/portable
@@ -1426,64 +1506,6 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         # ── DaVinci Resolve wrapper ───────────────────────────
         console.print()
         log_step("Configuring DaVinci Resolve integration...")
-
-        py_auto_installed = False
-
-        if os.name == "nt":
-            def _has_system_python():
-                import winreg
-                found_in_reg = False
-                try:
-                    for hkey in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-                        try:
-                            with winreg.OpenKey(hkey, r"SOFTWARE\Python\PythonCore") as key:
-                                num_subkeys = winreg.QueryInfoKey(key)[0]
-                                for i in range(num_subkeys):
-                                    subkey_name = winreg.EnumKey(key, i)
-                                    if subkey_name.startswith("3."):
-                                        found_in_reg = True
-                                        break
-                        except OSError: pass
-                except Exception: pass
-                
-                if found_in_reg:
-                    return True
-                    
-                try:
-                    import shutil, sys, subprocess
-                    sys_py = shutil.which("python") or shutil.which("python3")
-                    if sys_py:
-                        res = subprocess.run([sys_py, "-V"], capture_output=True, text=True, timeout=2)
-                        if "Python 3." in res.stdout or "Python 3." in res.stderr: 
-                            return True
-                except Exception: pass
-                return False
-
-            if not _has_system_python():
-                log_warn("System Python not detected. DaVinci Resolve requires it.")
-                sp_py = Spinner("Downloading & installing System Python 3.10...").start()
-                try:
-                    py_url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe"
-                    py_exe = os.path.join(tempfile.gettempdir(), "python_installer.exe")
-                    if download(py_url, py_exe):
-                        res = subprocess.run([py_exe, "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_test=0", "Include_launcher=0"])
-                        if res.returncode in (0, 1641, 3010):
-                            sp_py.done(ok=True)
-                            log_ok("System Python 3.10 installed successfully.")
-                            py_auto_installed = True
-                            try:
-                                with open(os.path.join(install_dir, ".python_auto_installed"), "w") as f:
-                                    f.write("1")
-                            except Exception: pass
-                        else:
-                            sp_py.done(ok=False)
-                            log_warn(f"Failed to auto-install Python: exit code {res.returncode}")
-                    else:
-                        sp_py.done(ok=False)
-                        log_warn("Failed to download Python installer.")
-                except Exception as e:
-                    sp_py.done(ok=False)
-                    log_warn(f"Failed to auto-install Python: {e}")
 
         debug_log(f"Resolve script dirs being checked: {resolve_dirs}")
 
