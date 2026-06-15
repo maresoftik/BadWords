@@ -1393,7 +1393,6 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
                         (["pacman", "-Sy", "--noconfirm", "python"])
                     ]
                     installed = False
-                    import shutil
                     for cmds in pkg_mgrs:
                         base_cmd = cmds[-1] if len(cmds) > 1 else cmds[0]
                         cmd_name = base_cmd[0]
