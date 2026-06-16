@@ -1055,22 +1055,39 @@ def calculate_script_missing_ranges(text_content, missing_indices):
 
 def _script_lines_for_side_by_side(script_text):
     """
-    Splits script text into stable comparison rows.
-    User-authored line breaks win. If the script is pasted as one long block,
-    fall back to sentence-ish rows so the first side-by-side version stays usable.
+    Intelligently splits the script into logical sentences/rows.
+    - Preserves double newlines (paragraphs).
+    - Merges single newlines (hard wraps).
+    - Splits paragraphs into sentences based on punctuation followed by a capital letter.
+    - Ignores rows that contain no alphanumeric characters (e.g., just "..." or "-").
     """
-    raw_lines = [ln.strip() for ln in script_text.replace("\r\n", "\n").split("\n")]
-    lines = [ln for ln in raw_lines if ln]
-    if len(lines) > 1:
-        return lines
-
-    text = script_text.strip()
-    if not text:
-        return []
-
-    sentence_rows = re.findall(r'[^.!?]+[.!?]*', text)
-    sentence_rows = [row.strip() for row in sentence_rows if row.strip()]
-    return sentence_rows or [text]
+    text = script_text.replace('\r\n', '\n')
+    paragraphs = re.split(r'\n\s*\n', text)
+    final_rows = []
+    
+    for para in paragraphs:
+        # Collapse single newlines and multiple spaces within a paragraph
+        para = re.sub(r'\s+', ' ', para).strip()
+        if not para:
+            continue
+            
+        # We find sentence boundaries: [.!?] (optionally followed by quotes/brackets)
+        # then spaces, then an Uppercase letter or Number.
+        # We insert a newline before the Uppercase letter to split it cleanly.
+        # \1 captures the punctuation, \2 captures the Uppercase letter.
+        para = re.sub(r'([.!?]+["\')\]]?)\s+([A-Z0-9ŚĆŻŹĄĘÓŁŃ])', r'\1\n\2', para)
+        
+        for s in para.split('\n'):
+            s = s.strip()
+            # Ignore empty lines or lines with purely punctuation (e.g. "...")
+            # This fixes the issue of "..." showing up as a missing yellow box.
+            if re.search(r'\w', s):
+                final_rows.append(s)
+                
+    if not final_rows:
+        return [script_text.strip()] if script_text.strip() else []
+        
+    return final_rows
 
 
 def _tokens_from_script_lines(lines):
