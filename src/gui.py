@@ -1794,17 +1794,26 @@ class TranscriptionCanvas(QWidget):
                 
                 script_kind = row.get("script_kind")
                 if script_kind == "improv_gap":
-                    ed.setStyleSheet(f"background: #2b2020; color: #9a9a9a; border: 1px solid #553333; border-radius: 4px; font-family: {pref_family}; font-size: {pref_size}pt; font-style: italic;")
+                    ed.setStyleSheet(f"background: #2b2020; color: #9a9a9a; border: 1px solid #553333; border-radius: 4px; font-family: {pref_family}; font-size: {pref_size}pt; font-style: italic; qproperty-alignment: 'AlignCenter';")
                     ed.setPlaceholderText(self.main_window.txt("sbs_improvised_error"))
-                    ed.setAlignment(Qt.AlignCenter)
+                    cursor = ed.textCursor()
+                    fmt = cursor.blockFormat()
+                    fmt.setAlignment(Qt.AlignCenter)
+                    cursor.setBlockFormat(fmt)
                 elif script_kind == "missing":
-                    ed.setStyleSheet(f"background: #3a3218; color: {config.FG_COLOR}; border: 1px solid #5a4b22; border-radius: 4px; font-family: {pref_family}; font-size: {pref_size}pt;")
+                    ed.setStyleSheet(f"background: #3a3218; color: {config.FG_COLOR}; border: 1px solid #5a4b22; border-radius: 4px; font-family: {pref_family}; font-size: {pref_size}pt; qproperty-alignment: 'AlignCenter';")
                     ed.setPlaceholderText(self.main_window.txt("sbs_unspoken"))
-                    ed.setAlignment(Qt.AlignCenter)
+                    cursor = ed.textCursor()
+                    fmt = cursor.blockFormat()
+                    fmt.setAlignment(Qt.AlignCenter)
+                    cursor.setBlockFormat(fmt)
                 else:
                     ed.setStyleSheet(f"background: transparent; color: {config.FG_COLOR}; border: none; font-family: {pref_family}; font-size: {pref_size}pt;")
                     ed.setPlaceholderText("")
-                    ed.setAlignment(Qt.AlignLeft)
+                    cursor = ed.textCursor()
+                    fmt = cursor.blockFormat()
+                    fmt.setAlignment(Qt.AlignLeft)
+                    cursor.setBlockFormat(fmt)
                     
                 ed.show()
                 y = row_start_y + row_h
