@@ -1362,4 +1362,14 @@ def build_side_by_side_alignment(script_text, words_data):
     for row in final_rows:
         row.pop("_line_idx", None)
 
-    return final_rows
+    # Performance & UI fix: Merge consecutive "missing" rows into a single block.
+    # This prevents creating hundreds of QTextEdit widgets for long unspoken segments,
+    # which causes severe scroll lag. We join them with \n\n to maintain visual separation.
+    merged_rows = []
+    for row in final_rows:
+        if merged_rows and row["script_kind"] == "missing" and merged_rows[-1]["script_kind"] == "missing":
+            merged_rows[-1]["script_text"] += "\n\n" + row["script_text"]
+        else:
+            merged_rows.append(row)
+
+    return merged_rows
