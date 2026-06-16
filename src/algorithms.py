@@ -1190,24 +1190,25 @@ def build_side_by_side_alignment(script_text, words_data):
                     if ti < j2:
                         trans_line_map[ti] = script_tokens[si]["line"]
 
-    # Forward-fill: repeat tokens should inherit the line of the content
-    # they're repeating (the most recent matched script line)
-    last_matched_line = -1
-    for ti in range(len(trans_tokens)):
-        tok = trans_tokens[ti]
-        if trans_line_map[ti] != -1:
-            last_matched_line = trans_line_map[ti]
-        elif tok.get("status") == "repeat" and last_matched_line != -1:
-            trans_line_map[ti] = last_matched_line
-
-    # Backward-fill: repeat tokens that come BEFORE their matched script line
-    # (false starts / retakes at the beginning of a section)
+    # Backward-fill MUST run first! 
+    # In BadWords, false starts and retakes precede the final "good" matched take.
+    # We want them to attach to the NEXT matched script line.
     last_matched_line = -1
     for ti in range(len(trans_tokens) - 1, -1, -1):
         tok = trans_tokens[ti]
         if trans_line_map[ti] != -1:
             last_matched_line = trans_line_map[ti]
         elif tok.get("status") == "repeat" and last_matched_line != -1:
+            trans_line_map[ti] = last_matched_line
+
+    # Forward-fill: acts as a fallback for trailing repeats at the end of the 
+    # recording, or edge cases where backward-fill couldn't find a match.
+    last_matched_line = -1
+    for ti in range(len(trans_tokens)):
+        tok = trans_tokens[ti]
+        if trans_line_map[ti] != -1:
+            last_matched_line = trans_line_map[ti]
+        elif tok.get("status") == "repeat" and trans_line_map[ti] == -1 and last_matched_line != -1:
             trans_line_map[ti] = last_matched_line
 
     # Bridge-fill: absorb isolated unmatched tokens (bad/None) that sit between
