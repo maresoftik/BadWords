@@ -1691,9 +1691,12 @@ class TranscriptionCanvas(QWidget):
             for idx, row in enumerate(self.sbs_rows):
                 ed = self.sbs_editors[idx]
                 
-                ed.blockSignals(True)
-                ed.setPlainText(row.get("script_text", ""))
-                ed.blockSignals(False)
+                new_text = row.get("script_text", "")
+                if getattr(ed, '_last_text', None) != new_text:
+                    ed.blockSignals(True)
+                    ed.setPlainText(new_text)
+                    ed.blockSignals(False)
+                    ed._last_text = new_text
                 
                 trans_toks = row.get("transcript_tokens", [])
                 
@@ -1791,7 +1794,10 @@ class TranscriptionCanvas(QWidget):
                 transcript_h = (y + line_height) - row_start_y
                 
                 # Dynamic height for script editor
-                ed.document().setTextWidth(max(1, script_w))
+                # Only recompute text width if width actually changed (very expensive operation on QTextDocument)
+                if getattr(ed, '_last_width', -1) != script_w:
+                    ed.document().setTextWidth(max(1, script_w))
+                    ed._last_width = script_w
                 script_doc_h = ed.document().size().height() + 10
                 
                 # Use whichever is taller
@@ -1802,26 +1808,27 @@ class TranscriptionCanvas(QWidget):
                 ed.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
                 
                 script_kind = row.get("script_kind")
-                text_opt = QTextOption()
-                
-                if script_kind == "improv_gap":
-                    ed.setStyleSheet(f"background: #2b2020; color: #9a9a9a; border: 1px solid #553333; border-radius: 4px; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt; font-style: italic;")
-                    ed.setCustomPlaceholderText(self.main_window.txt("sbs_improvised_error"))
-                    text_opt.setAlignment(Qt.AlignCenter)
-                    ed.document().setDefaultTextOption(text_opt)
-                    ed.setAlignment(Qt.AlignCenter)
-                elif script_kind == "missing":
-                    ed.setStyleSheet(f"background: #3a3218; color: {config.FG_COLOR}; border: 1px solid #5a4b22; border-radius: 4px; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
-                    ed.setCustomPlaceholderText(self.main_window.txt("sbs_unspoken"))
-                    text_opt.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-                    ed.document().setDefaultTextOption(text_opt)
-                    ed.setAlignment(Qt.AlignLeft)
-                else:
-                    ed.setStyleSheet(f"background: {config.BG_COLOR}; color: {config.FG_COLOR}; border: none; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
-                    ed.setCustomPlaceholderText("")
-                    text_opt.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-                    ed.document().setDefaultTextOption(text_opt)
-                    ed.setAlignment(Qt.AlignLeft)
+                if getattr(ed, '_last_kind', None) != script_kind:
+                    text_opt = QTextOption()
+                    if script_kind == "improv_gap":
+                        ed.setStyleSheet(f"background: #2b2020; color: #9a9a9a; border: 1px solid #553333; border-radius: 4px; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt; font-style: italic;")
+                        ed.setCustomPlaceholderText(self.main_window.txt("sbs_improvised_error"))
+                        text_opt.setAlignment(Qt.AlignCenter)
+                        ed.document().setDefaultTextOption(text_opt)
+                        ed.setAlignment(Qt.AlignCenter)
+                    elif script_kind == "missing":
+                        ed.setStyleSheet(f"background: #3a3218; color: {config.FG_COLOR}; border: 1px solid #5a4b22; border-radius: 4px; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
+                        ed.setCustomPlaceholderText(self.main_window.txt("sbs_unspoken"))
+                        text_opt.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+                        ed.document().setDefaultTextOption(text_opt)
+                        ed.setAlignment(Qt.AlignLeft)
+                    else:
+                        ed.setStyleSheet(f"background: {config.BG_COLOR}; color: {config.FG_COLOR}; border: none; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
+                        ed.setCustomPlaceholderText("")
+                        text_opt.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+                        ed.document().setDefaultTextOption(text_opt)
+                        ed.setAlignment(Qt.AlignLeft)
+                    ed._last_kind = script_kind
                     
                 ed.show()
                 y = row_start_y + row_h
