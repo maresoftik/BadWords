@@ -1518,6 +1518,29 @@ class UndoManager:
 
         return {"type": "paint", "changes": reverse_changes}
 
+class SBSTextEdit(QTextEdit):
+    """
+    A custom QTextEdit that perfectly centers its placeholder text natively,
+    bypassing Qt's hardcoded left-alignment for placeholders in QTextEdit.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._custom_placeholder = ""
+        
+    def setCustomPlaceholderText(self, text):
+        self._custom_placeholder = text
+        self.viewport().update()
+        
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.document().isEmpty() and self._custom_placeholder:
+            from PySide6.QtGui import QPainter, QColor
+            from PySide6.QtCore import Qt
+            p = QPainter(self.viewport())
+            p.setPen(QColor("#9a9a9a"))
+            p.setFont(self.font())
+            p.drawText(self.viewport().rect(), Qt.AlignCenter | Qt.TextWordWrap, self._custom_placeholder)
+
 
 class TranscriptionCanvas(QWidget):
     def __init__(self, main_window, parent=None):
@@ -1617,7 +1640,7 @@ class TranscriptionCanvas(QWidget):
             w.pop('_ts_text', None)
             w.pop('_separator_y', None)
 
-        from PySide6.QtGui import QFontMetrics, QFont
+        from PySide6.QtGui import QFontMetrics, QFont, QTextOption
         from PySide6.QtCore import Qt, QRect
         from PySide6.QtWidgets import QFrame, QTextEdit
         
@@ -1661,7 +1684,7 @@ class TranscriptionCanvas(QWidget):
                 self.sbs_editors = []
                 
             while len(self.sbs_editors) < len(self.sbs_rows):
-                ed = QTextEdit(self)
+                ed = SBSTextEdit(self)
                 ed.setFrameShape(QFrame.NoFrame)
                 ed.textChanged.connect(self._on_sbs_editor_changed)
                 self.sbs_editors.append(ed)
@@ -1793,27 +1816,26 @@ class TranscriptionCanvas(QWidget):
                 ed.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
                 
                 script_kind = row.get("script_kind")
+                text_opt = QTextOption()
+                
                 if script_kind == "improv_gap":
-                    ed.setStyleSheet(f"background: #2b2020; color: #9a9a9a; border: 1px solid #553333; border-radius: 4px; font-family: {pref_family}; font-size: {pref_size}pt; font-style: italic; qproperty-alignment: 'AlignCenter';")
-                    ed.setPlaceholderText(self.main_window.txt("sbs_improvised_error"))
-                    cursor = ed.textCursor()
-                    fmt = cursor.blockFormat()
-                    fmt.setAlignment(Qt.AlignCenter)
-                    cursor.setBlockFormat(fmt)
+                    ed.setStyleSheet(f"background: #2b2020; color: #9a9a9a; border: 1px solid #553333; border-radius: 4px; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt; font-style: italic;")
+                    ed.setCustomPlaceholderText(self.main_window.txt("sbs_improvised_error"))
+                    text_opt.setAlignment(Qt.AlignCenter)
+                    ed.document().setDefaultTextOption(text_opt)
+                    ed.setAlignment(Qt.AlignCenter)
                 elif script_kind == "missing":
-                    ed.setStyleSheet(f"background: #3a3218; color: {config.FG_COLOR}; border: 1px solid #5a4b22; border-radius: 4px; font-family: {pref_family}; font-size: {pref_size}pt; qproperty-alignment: 'AlignCenter';")
-                    ed.setPlaceholderText(self.main_window.txt("sbs_unspoken"))
-                    cursor = ed.textCursor()
-                    fmt = cursor.blockFormat()
-                    fmt.setAlignment(Qt.AlignCenter)
-                    cursor.setBlockFormat(fmt)
+                    ed.setStyleSheet(f"background: #3a3218; color: {config.FG_COLOR}; border: 1px solid #5a4b22; border-radius: 4px; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
+                    ed.setCustomPlaceholderText(self.main_window.txt("sbs_unspoken"))
+                    text_opt.setAlignment(Qt.AlignCenter)
+                    ed.document().setDefaultTextOption(text_opt)
+                    ed.setAlignment(Qt.AlignCenter)
                 else:
-                    ed.setStyleSheet(f"background: transparent; color: {config.FG_COLOR}; border: none; font-family: {pref_family}; font-size: {pref_size}pt;")
-                    ed.setPlaceholderText("")
-                    cursor = ed.textCursor()
-                    fmt = cursor.blockFormat()
-                    fmt.setAlignment(Qt.AlignLeft)
-                    cursor.setBlockFormat(fmt)
+                    ed.setStyleSheet(f"background: transparent; color: {config.FG_COLOR}; border: none; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
+                    ed.setCustomPlaceholderText("")
+                    text_opt.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+                    ed.document().setDefaultTextOption(text_opt)
+                    ed.setAlignment(Qt.AlignLeft)
                     
                 ed.show()
                 y = row_start_y + row_h

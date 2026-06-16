@@ -1077,12 +1077,51 @@ def _script_lines_for_side_by_side(script_text):
         # \1 captures the punctuation, \2 captures the Uppercase letter.
         para = re.sub(r'([.!?]+["\')\]]?)\s+([A-Z0-9ŚĆŻŹĄĘÓŁŃ])', r'\1\n\2', para)
         
-        for s in para.split('\n'):
-            s = s.strip()
-            # Ignore empty lines or lines with purely punctuation (e.g. "...")
-            # This fixes the issue of "..." showing up as a missing yellow box.
-            if re.search(r'\w', s):
-                final_rows.append(s)
+        for sentence in para.split('\n'):
+            sentence = sentence.strip()
+            if not re.search(r'\w', sentence):
+                continue
+                
+            # Sub-sentence Flow Breaker:
+            # Subdivide extremely long sentences at logical pauses (,, ;, :, —, ...) 
+            # while ensuring we don't over-fragment (each piece must have >= 5 words).
+            chunks = re.split(r'([,;:—]+|\.{2,})\s+', sentence)
+            
+            sub_rows = []
+            curr_str = ""
+            curr_words = 0
+            
+            i = 0
+            while i < len(chunks):
+                text_part = chunks[i]
+                punct_part = chunks[i+1] if i + 1 < len(chunks) else ""
+                
+                segment = text_part + punct_part
+                seg_words = len(segment.split())
+                
+                if curr_words == 0:
+                    curr_str = segment
+                    curr_words = seg_words
+                else:
+                    if curr_words >= 5:
+                        sub_rows.append(curr_str.strip())
+                        curr_str = segment
+                        curr_words = seg_words
+                    else:
+                        curr_str += " " + segment
+                        curr_words += seg_words
+                i += 2
+                
+            if curr_str:
+                # Only merge backwards if the trailing thought is extremely short (< 3 words)
+                if curr_words < 3 and len(sub_rows) > 0:
+                    sub_rows[-1] += " " + curr_str.strip()
+                else:
+                    sub_rows.append(curr_str.strip())
+                    
+            for r in sub_rows:
+                if re.search(r'\w', r):
+                    final_rows.append(r)
                 
     if not final_rows:
         return [script_text.strip()] if script_text.strip() else []
