@@ -1047,3 +1047,262 @@ def calculate_script_missing_ranges(text_content, missing_indices):
             ranges.append((match.start(), match.end()))
             
     return ranges
+
+
+# ==========================================
+# 7. SIDE-BY-SIDE SCRIPT / TRANSCRIPT VIEW
+# ==========================================
+
+def _script_lines_for_side_by_side(script_text):
+    """
+    Splits script text into stable comparison rows.
+    User-authored line breaks win. If the script is pasted as one long block,
+    fall back to sentence-ish rows so the first side-by-side version stays usable.
+    """
+    raw_lines = [ln.strip() for ln in script_text.replace("\r\n", "\n").split("\n")]
+    lines = [ln for ln in raw_lines if ln]
+    if len(lines) > 1:
+        return lines
+
+    text = script_text.strip()
+    if not text:
+        return []
+
+    sentence_rows = re.findall(r'[^.!?]+[.!?]*', text)
+    sentence_rows = [row.strip() for row in sentence_rows if row.strip()]
+    return sentence_rows or [text]
+
+
+def _tokens_from_script_lines(lines):
+    tokens = []
+    for row_idx, line in enumerate(lines):
+        for match in re.finditer(r"\S+", line):
+            raw = match.group(0)
+            clean = super_clean(raw)
+            if clean:
+                tokens.append({"text": raw, "clean": clean, "row": row_idx})
+    return tokens
+
+
+def _tokens_from_words_data(words_data):
+    tokens = []
+    for w in words_data or []:
+        if w.get("type") in ("silence", "inaudible") or w.get("is_inaudible"):
+            continue
+        clean = super_clean(w.get("text", ""))
+        if clean:
+            tokens.append({
+                "text": w.get("text", "").strip(),
+                "clean": clean,
+                "status": w.get("status"),
+                "word_id": w.get("id"),
+                "is_segment_start": w.get("is_segment_start", False),
+                "start": w.get("start", 0.0),
+                "original_word": w,
+            })
+    return tokens
+
+
+def _side_by_side_text_from_transcript_tokens(tokens):
+    """
+    Keeps detected retake runs visually separated. The GUI renders newline
+    characters as a fresh line inside the transcript cell.
+    """
+    if not tokens:
+        return ""
+
+    parts = []
+    prev_repeat = False
+    for tok in tokens:
+        is_repeat = tok.get("status") == "repeat"
+        if is_repeat and parts and not prev_repeat:
+            parts.append("\n")
+        elif parts and parts[-1] != "\n":
+            parts.append(" ")
+        parts.append(tok.get("text", ""))
+        prev_repeat = is_repeat
+    return "".join(parts).strip()
+
+
+def build_side_by_side_alignment(script_text, words_data):
+    """
+    Builds rows for the side-by-side compare view.
+    
+    Strategy: Group by SCRIPT LINES, not transcript segments.
+    1. Split script into lines (user line-breaks, or sentence fallback).
+    2. Use difflib to map each transcript token to its best-matching script line.
+    3. Absorb repeat runs into the script line they're repeating.
+    4. Unmatched transcript tokens (improv) → own row with empty script.
+    5. Unmatched script lines (unspoken) → own row with empty transcript.
+    """
+    script_lines = _script_lines_for_side_by_side(script_text)
+    trans_tokens = _tokens_from_words_data(words_data)
+
+    if not script_lines and not trans_tokens:
+        return []
+
+    # Build flat script token list with line indices
+    script_tokens = []
+    for line_idx, line in enumerate(script_lines):
+        for match in re.finditer(r"\S+", line):
+            raw = match.group(0)
+            clean = super_clean(raw)
+            if clean:
+                script_tokens.append({"text": raw, "clean": clean, "line": line_idx})
+
+    if not script_tokens and not trans_tokens:
+        return []
+
+    # Map each transcript token → script line (or -1 for unmatched/improv)
+    trans_line_map = [-1] * len(trans_tokens)
+
+    if script_tokens and trans_tokens:
+        sm = difflib.SequenceMatcher(
+            None,
+            [t["clean"] for t in script_tokens],
+            [t["clean"] for t in trans_tokens],
+            autojunk=False,
+        )
+
+        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+            if tag in ("equal", "replace"):
+                for i in range(i2 - i1):
+                    si = i1 + i
+                    # Proportionally map script range to transcript range
+                    ti = j1 + int(i * (j2 - j1) / max(1, i2 - i1))
+                    if ti < j2:
+                        trans_line_map[ti] = script_tokens[si]["line"]
+
+    # Forward-fill: repeat tokens should inherit the line of the content
+    # they're repeating (the most recent matched script line)
+    last_matched_line = -1
+    for ti in range(len(trans_tokens)):
+        tok = trans_tokens[ti]
+        if trans_line_map[ti] != -1:
+            last_matched_line = trans_line_map[ti]
+        elif tok.get("status") == "repeat" and last_matched_line != -1:
+            trans_line_map[ti] = last_matched_line
+
+    # Backward-fill: repeat tokens that come BEFORE their matched script line
+    # (false starts / retakes at the beginning of a section)
+    last_matched_line = -1
+    for ti in range(len(trans_tokens) - 1, -1, -1):
+        tok = trans_tokens[ti]
+        if trans_line_map[ti] != -1:
+            last_matched_line = trans_line_map[ti]
+        elif tok.get("status") == "repeat" and last_matched_line != -1:
+            trans_line_map[ti] = last_matched_line
+
+    # Bridge-fill: absorb isolated unmatched tokens (bad/None) that sit between
+    # two groups assigned to the SAME script line. This prevents small gaps 
+    # (like a stutter or filler word mid-retake) from splitting a row.
+    for ti in range(len(trans_tokens)):
+        if trans_line_map[ti] != -1:
+            continue
+        # Look backward and forward for nearest assigned lines
+        prev_line = -1
+        for pi in range(ti - 1, -1, -1):
+            if trans_line_map[pi] != -1:
+                prev_line = trans_line_map[pi]
+                break
+        next_line = -1
+        for ni in range(ti + 1, len(trans_tokens)):
+            if trans_line_map[ni] != -1:
+                next_line = trans_line_map[ni]
+                break
+        if prev_line != -1 and prev_line == next_line:
+            trans_line_map[ti] = prev_line
+
+    # Build line → transcript tokens mapping (ordered list of groups)
+    # We need to preserve transcript ORDER, so we walk through trans_tokens
+    # and emit groups: (line_idx_or_None, [tokens])
+    groups = []  # list of (line_idx, [token, ...])
+    current_line = None
+    current_toks = []
+
+    for ti, tok in enumerate(trans_tokens):
+        line = trans_line_map[ti]
+        if line == current_line:
+            current_toks.append(tok)
+        else:
+            if current_toks:
+                groups.append((current_line, current_toks))
+            current_line = line
+            current_toks = [tok]
+    if current_toks:
+        groups.append((current_line, current_toks))
+
+    # Track which script lines have been used
+    used_script_lines = set()
+    for line_idx, _ in groups:
+        if line_idx is not None and line_idx != -1:
+            used_script_lines.add(line_idx)
+
+    # Build final rows by interleaving script lines and transcript groups
+    final_rows = []
+    emitted_script_lines = set()
+
+    # Walk through groups in transcript order
+    for line_idx, toks in groups:
+        # Before emitting this group, emit any earlier unmatched script lines
+        if line_idx is not None and line_idx != -1:
+            for sl in range(line_idx):
+                if sl not in emitted_script_lines and sl not in used_script_lines:
+                    final_rows.append({
+                        "script_text": script_lines[sl],
+                        "transcript_tokens": [],
+                        "transcript_text": "",
+                        "script_kind": "missing",
+                        "transcript_kind": "missing_gap",
+                    })
+                    emitted_script_lines.add(sl)
+
+        if line_idx is None or line_idx == -1:
+            # Improvisation / unmatched transcript
+            final_rows.append({
+                "script_text": "",
+                "transcript_tokens": toks,
+                "transcript_text": " ".join(t.get("text", "") for t in toks),
+                "script_kind": "improv_gap",
+                "transcript_kind": "improv",
+            })
+        else:
+            # Check if this script line already has a row (merge)
+            existing = None
+            for row in final_rows:
+                if row.get("_line_idx") == line_idx and row.get("script_kind") != "missing":
+                    existing = row
+                    break
+
+            if existing:
+                # Merge tokens into existing row
+                existing["transcript_tokens"].extend(toks)
+                existing["transcript_text"] += " " + " ".join(t.get("text", "") for t in toks)
+            else:
+                script_line_text = script_lines[line_idx] if line_idx < len(script_lines) else ""
+                final_rows.append({
+                    "_line_idx": line_idx,
+                    "script_text": script_line_text,
+                    "transcript_tokens": toks,
+                    "transcript_text": " ".join(t.get("text", "") for t in toks),
+                    "script_kind": "normal",
+                    "transcript_kind": "normal",
+                })
+                emitted_script_lines.add(line_idx)
+
+    # Append any remaining unmatched script lines at the end
+    for sl in range(len(script_lines)):
+        if sl not in emitted_script_lines:
+            final_rows.append({
+                "script_text": script_lines[sl],
+                "transcript_tokens": [],
+                "transcript_text": "",
+                "script_kind": "missing",
+                "transcript_kind": "missing_gap",
+            })
+
+    # Clean up internal keys
+    for row in final_rows:
+        row.pop("_line_idx", None)
+
+    return final_rows
