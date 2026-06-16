@@ -1519,28 +1519,12 @@ class UndoManager:
         return {"type": "paint", "changes": reverse_changes}
 
 class SBSTextEdit(QTextEdit):
-    """
-    A custom QTextEdit that perfectly centers its placeholder text natively,
-    bypassing Qt's hardcoded left-alignment for placeholders in QTextEdit.
-    """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._custom_placeholder = ""
         
     def setCustomPlaceholderText(self, text):
-        self._custom_placeholder = text
-        self.viewport().update()
-        
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if self.document().isEmpty() and self._custom_placeholder:
-            from PySide6.QtGui import QPainter, QColor
-            from PySide6.QtCore import Qt
-            p = QPainter(self.viewport())
-            p.setPen(QColor("#9a9a9a"))
-            p.setFont(self.font())
-            p.drawText(self.viewport().rect(), Qt.AlignCenter | Qt.TextWordWrap, self._custom_placeholder)
-
+        # We use native placeholder instead of custom paint to prevent QPainter lag storms
+        self.setPlaceholderText(text)
 
 class TranscriptionCanvas(QWidget):
     def __init__(self, main_window, parent=None):
@@ -1627,7 +1611,9 @@ class TranscriptionCanvas(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._calculate_layout()
+        # Prevent infinite layout loops: only recalculate when width changes
+        if not event.oldSize().isValid() or event.oldSize().width() != event.size().width():
+            self._calculate_layout()
 
     def _calculate_layout(self):
         if not hasattr(self, 'words_data') or not self.words_data:
@@ -1827,11 +1813,11 @@ class TranscriptionCanvas(QWidget):
                 elif script_kind == "missing":
                     ed.setStyleSheet(f"background: #3a3218; color: {config.FG_COLOR}; border: 1px solid #5a4b22; border-radius: 4px; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
                     ed.setCustomPlaceholderText(self.main_window.txt("sbs_unspoken"))
-                    text_opt.setAlignment(Qt.AlignCenter)
+                    text_opt.setAlignment(Qt.AlignLeft | Qt.AlignTop)
                     ed.document().setDefaultTextOption(text_opt)
-                    ed.setAlignment(Qt.AlignCenter)
+                    ed.setAlignment(Qt.AlignLeft)
                 else:
-                    ed.setStyleSheet(f"background: transparent; color: {config.FG_COLOR}; border: none; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
+                    ed.setStyleSheet(f"background: {config.BG_COLOR}; color: {config.FG_COLOR}; border: none; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
                     ed.setCustomPlaceholderText("")
                     text_opt.setAlignment(Qt.AlignLeft | Qt.AlignTop)
                     ed.document().setDefaultTextOption(text_opt)
@@ -1839,6 +1825,10 @@ class TranscriptionCanvas(QWidget):
                     
                 ed.show()
                 y = row_start_y + row_h
+
+            # Hide any unused editors from previous longer layouts
+            for i in range(len(self.sbs_rows), len(self.sbs_editors)):
+                self.sbs_editors[i].hide()
 
             self._cached_visible_words = visible_words
             self.setMinimumHeight(y + line_height + 40)
@@ -1925,11 +1915,15 @@ class TranscriptionCanvas(QWidget):
 
     def _on_sbs_editor_changed(self):
         parts = []
-        for ed in self.sbs_editors:
-            if ed.isVisible():
-                parts.append(ed.toPlainText())
+        for i in range(len(getattr(self, 'sbs_rows', []))):
+            if i < len(self.sbs_editors):
+                parts.append(self.sbs_editors[i].toPlainText())
         new_script = "\n\n".join(parts)
         
+        current_script = self.main_window.text_script.toPlainText()
+        if new_script == current_script:
+            return
+            
         self.main_window.text_script.blockSignals(True)
         self.main_window.text_script.setPlainText(new_script)
         self.main_window.text_script.blockSignals(False)
@@ -10037,6 +10031,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self.scroll_area = QScrollArea(page)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.scroll_area.setStyleSheet(f"QScrollArea {{ background-color: {config.BG_COLOR}; border: none; }}")
         
         self.lbl_skipped_noise = QLabel()
