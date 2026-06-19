@@ -8247,7 +8247,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self.btn_analyze_standalone = QPushButton(self.txt("btn_analyze_standalone"))
         self.btn_analyze_standalone.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_analyze_standalone.setFixedHeight(35)
-        self.btn_analyze_standalone.setEnabled(False)
+        self.btn_analyze_standalone.setStyleSheet(
+            f"QPushButton {{ background-color: {config.BTN_BG}; border: 1px solid #111; border-radius: 4px; color: #fff; font-weight: bold; padding: 8px; }}"
+        )
         l_script_analysis.addWidget(self.btn_analyze_standalone)
 
         self.btn_analyze_compare = QPushButton(self.txt("btn_analyze_compare"))
@@ -8639,7 +8641,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.Enter:
             if watched == getattr(self, 'btn_analyze_standalone', None):
-                self.shared_tooltip.show_at(watched, self.txt("tooltip_dev"), is_right_side=False)
+                self.shared_tooltip.show_at(watched, self.txt("tooltip_standalone"), is_right_side=False)
             elif watched == getattr(self, 'btn_clear_transcript', None):
                 # CRITICAL: is_right_side=True forces it to render to the left of the button!
                 self.shared_tooltip.show_at(watched, self.txt("tooltip_clear_all_markings"), is_right_side=True)
