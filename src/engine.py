@@ -444,6 +444,12 @@ except Exception as e:
             if filler_words_list:
                 initial_prompt_str += f" {', '.join(filler_words_list)}"
 
+        kwargs_str = ""
+        if prefs.get('ai_length_penalty', 1.0) != 1.0:
+            kwargs_str += f", length_penalty={repr(prefs.get('ai_length_penalty', 1.0))}"
+        if prefs.get('ai_repetition_penalty', 1.0) != 1.0:
+            kwargs_str += f", repetition_penalty={repr(prefs.get('ai_repetition_penalty', 1.0))}"
+
         env = os.environ.copy()
         env["HF_HOME"] = self.models_dir
         
@@ -556,18 +562,18 @@ try:
             patience={repr(prefs.get('ai_patience', 1.0))},
             language={repr(lang) if lang != 'Auto' else 'None'},
             initial_prompt={repr(initial_prompt_str)},
-            condition_on_previous_text=False,
+            condition_on_previous_text={repr(prefs.get('ai_condition_on_prev', False))},
             vad_filter={repr(prefs.get('ai_vad_filter', False))},
             temperature={repr(prefs.get('ai_temperature', 0.0))},
-            no_speech_threshold={0.6 if islands is not None else repr(prefs.get('ai_no_speech_threshold', 0.2))},
+            no_speech_threshold={repr(prefs.get('ai_no_speech_threshold', 0.6))},
             log_prob_threshold={repr(prefs.get('ai_logprob_threshold', -1.0))},
-            compression_ratio_threshold={2.4 if islands is not None else repr(prefs.get('ai_compression_ratio_threshold', 10.0))},
+            compression_ratio_threshold={repr(prefs.get('ai_compression_ratio_threshold', 2.4))},
             no_repeat_ngram_size={repr(prefs.get('ai_no_repeat_ngram_size', 0))},
             regroup={repr(prefs.get('ai_regroup', False))},
             suppress_silence={repr(prefs.get('ai_suppress_silence', False))},
             q_levels={repr(prefs.get('ai_q_levels', 20))},
             k_size={repr(prefs.get('ai_k_size', 5))},
-            verbose=False
+            verbose=False{kwargs_str}
         )
         if chunk_result.segments:
             for seg in chunk_result.segments:
@@ -647,15 +653,15 @@ try:
         condition_on_previous_text={repr(prefs.get('ai_condition_on_prev', False))},
         vad_filter={repr(prefs.get('ai_vad_filter', False))},
         temperature={repr(prefs.get('ai_temperature', 0.0))},
-        no_speech_threshold={repr(prefs.get('ai_no_speech_threshold', 0.2))},
+        no_speech_threshold={repr(prefs.get('ai_no_speech_threshold', 0.6))},
         log_prob_threshold={repr(prefs.get('ai_logprob_threshold', -1.0))},
-        compression_ratio_threshold={repr(prefs.get('ai_compression_ratio_threshold', 10.0))},
+        compression_ratio_threshold={repr(prefs.get('ai_compression_ratio_threshold', 2.4))},
         no_repeat_ngram_size={repr(prefs.get('ai_no_repeat_ngram_size', 0))},
         # Stable-TS specific flags for alignment precision:
         regroup={repr(prefs.get('ai_regroup', False))},
         suppress_silence={repr(prefs.get('ai_suppress_silence', False))},
         q_levels={repr(prefs.get('ai_q_levels', 20))},
-        k_size={repr(prefs.get('ai_k_size', 5))}
+        k_size={repr(prefs.get('ai_k_size', 5))}{kwargs_str}
     )
     
     output_segments = []
