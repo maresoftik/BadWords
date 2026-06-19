@@ -6610,7 +6610,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self.textedit_prompt.setMaximumHeight(80)
             self.textedit_prompt.setPlaceholderText("e.g. Transcribe film dialogue with punctuation.")
             saved_prompt = prefs.get('ai_initial_prompt', '').strip()
-            if saved_prompt and saved_prompt != config.DEFAULT_WHISPER_PROMPT and saved_prompt != config.GOLDEN_INITIAL_PROMPT:
+            if saved_prompt:
                 display_prompt = saved_prompt
             else:
                 # Resolve ISO code from display name in prefs
