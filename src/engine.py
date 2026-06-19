@@ -2215,6 +2215,7 @@ except Exception as e:
             if audio_end_cap_s:
                 calc_settings["audio_end_cap_s"] = audio_end_cap_s
             clean_ops = self.calculate_timeline_structure(words_data, fps, calc_settings)
+            time.sleep(0.05)
 
             # ── NAME FOR NEW TIMELINE ─────────────────────────────────────────
             clean_name, next_idx = self.resolve_handler.get_next_badwords_edit_index(original_tl_name)
@@ -2254,9 +2255,11 @@ except Exception as e:
                 # Step 1: Export source timeline XML (Resolve native, all clip types)
                 set_status(self.txt("status_assembly_xml_build"))
                 set_progress(-1)
+                time.sleep(0.05)
                 export_ok = self.resolve_handler.export_timeline_xml(
                     original_tl_name, src_xml_path
                 )
+                time.sleep(0.05)
                 if not export_ok:
                     log_error("assemble_timeline: source XML export failed.")
                 else:
@@ -2264,6 +2267,7 @@ except Exception as e:
                     ok_cut, color_schedule = self.resolve_handler.apply_ops_cuts_to_timeline_xml(
                         src_xml_path, clean_ops, cut_xml_path, audio_only_mode=audio_only_mode
                     )
+                    time.sleep(0.05)
 
                     if ok_cut:
                         set_status(self.txt("status_assembly_xml_import"))
@@ -2289,6 +2293,7 @@ except Exception as e:
                             cut_xml_path,
                             import_options,
                         )
+                        time.sleep(0.05)
 
 
                         if new_tl:
