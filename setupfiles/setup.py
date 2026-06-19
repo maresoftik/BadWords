@@ -1603,6 +1603,20 @@ def option_install_update(force_main=False, preset_path=None, title="── Stan
         else:
             log_warn("Could not locate site-packages in venv.")
 
+        # ── Patch PySide6 for older Python Compatibility ──────────
+        pyside_init = os.path.join(libs_link, "PySide6", "__init__.py")
+        if os.path.isfile(pyside_init):
+            try:
+                with open(pyside_init, "r", encoding="utf-8") as f:
+                    p_content = f.read()
+                if "def __getattr__(name: str) -> list[str]:" in p_content:
+                    p_content = p_content.replace("def __getattr__(name: str) -> list[str]:", "def __getattr__(name: str) -> list:")
+                    with open(pyside_init, "w", encoding="utf-8") as f:
+                        f.write(p_content)
+                    debug_log("Patched PySide6/__init__.py for older Python compatibility.")
+            except Exception as e:
+                debug_log(f"Failed to patch PySide6: {e}")
+
         # ── DaVinci Resolve wrapper ───────────────────────────
         console.print()
         log_step("Configuring DaVinci Resolve integration...")

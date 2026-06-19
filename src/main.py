@@ -15,7 +15,24 @@ Connects all components into a working application.
 """
 
 import sys
+import os
 import traceback
+
+# --- Hotfix for older Python versions (Resolve 20 + Python < 3.9) ---
+if sys.version_info < (3, 9):
+    try:
+        for p in sys.path:
+            pyside_init = os.path.join(p, "PySide6", "__init__.py")
+            if os.path.exists(pyside_init):
+                with open(pyside_init, "r", encoding="utf-8") as f:
+                    p_content = f.read()
+                if "def __getattr__(name: str) -> list[str]:" in p_content:
+                    p_content = p_content.replace("def __getattr__(name: str) -> list[str]:", "def __getattr__(name: str) -> list:")
+                    with open(pyside_init, "w", encoding="utf-8") as f:
+                        f.write(p_content)
+                break
+    except Exception:
+        pass
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QThread, Signal
