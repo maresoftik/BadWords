@@ -204,6 +204,32 @@ class AudioEngine:
     # 0. SMART COMPUTE DETECTION
     # ==========================================
 
+    def _get_system_ram_gb(self):
+        try:
+            import psutil
+            return psutil.virtual_memory().total / (1024**3)
+        except ImportError:
+            pass
+        
+        try:
+            import platform, subprocess
+            if platform.system() == "Darwin":
+                res = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True)
+                return int(res.stdout.strip()) / (1024**3)
+            elif platform.system() == "Windows":
+                res = subprocess.run(["wmic", "computersystem", "get", "TotalPhysicalMemory"], capture_output=True, text=True)
+                lines = res.stdout.strip().split('\n')
+                if len(lines) > 1:
+                    return int(lines[1].strip()) / (1024**3)
+            elif platform.system() == "Linux":
+                with open('/proc/meminfo', 'r') as f:
+                    for line in f:
+                        if line.startswith('MemTotal:'):
+                            return int(line.split()[1]) / (1024**2)
+        except Exception:
+            pass
+        return 8.0 # fallback
+
     def _get_optimal_compute_type(self, device="cpu"):
         """
         3-LEVEL SMART COMPUTE DETECTION:
@@ -216,6 +242,9 @@ class AudioEngine:
         directly without calling this function.
         """
         if device != "cuda":
+            ram_gb = self._get_system_ram_gb()
+            if hasattr(self, 'os_doc') and getattr(self.os_doc, 'is_mac', False):
+                return "float32" if ram_gb >= 14.0 else "float16"
             return "int8"
         try:
             result = subprocess.run(
@@ -1226,7 +1255,11 @@ except Exception as e:
             # Whisper expects None for auto-detection, not the string "auto"
             if isinstance(lang, str) and lang.lower() == "auto":
                 lang = None
-            model = settings.get('model', 'medium').split()[0]
+            _raw_model = settings.get('model', 'medium')
+            if "Turbo" in _raw_model:
+                model = "large-v3-turbo"
+            else:
+                model = _raw_model.split()[0].lower()
             
             # --- AUTO DEVICE LOGIC & COMPUTE TYPE ---
             raw_device = settings.get('device', 'Auto')
@@ -1275,8 +1308,27 @@ except Exception as e:
                     fw_compute = saved_compute
                     log_info(f"[Compute] User override (CPU): {fw_compute}")
                 else:
-                    fw_compute = "int8"
-                    log_info(f"[Compute] Auto (CPU): {fw_compute}")
+                    ram_gb = self._get_system_ram_gb()
+                    if hasattr(self, 'os_doc') and getattr(self.os_doc, 'is_mac', False):
+                        if ram_gb >= 14.0:
+                            fw_compute = "float32"
+                            log_info(f"[Compute] Auto (CPU/Mac): {fw_compute} (Plenty of RAM detected: {ram_gb:.1f}GB)")
+                        else:
+                            fw_compute = "float16"
+                            log_info(f"[Compute] Auto (CPU/Mac): {fw_compute} (Conserving RAM on {ram_gb:.1f}GB system)")
+                    else:
+                        fw_compute = "int8"
+                        log_info(f"[Compute] Auto (CPU): {fw_compute}")
+
+            # --- OOM PROTECTION ---
+            try:
+                ram_gb = self._get_system_ram_gb()
+                if ram_gb < 12.0 and fw_compute == "float32" and "large" in model.lower():
+                    log_info(f"[OOM Protection] System has only {ram_gb:.1f}GB RAM. Downgrading {model} from float32 to prevent crash.")
+                    fw_compute = "float16" if (hasattr(self, 'os_doc') and getattr(self.os_doc, 'is_mac', False)) else "int8"
+            except Exception:
+                pass
+
 
             filler_words = settings.get('filler_words', [])
             fps = self.resolve_handler.fps
