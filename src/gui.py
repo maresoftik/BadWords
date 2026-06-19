@@ -7617,7 +7617,8 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         QApplication.instance().installEventFilter(self._global_app_filter)
         
         # Declare panel containers early for Pyre inference
-        self._sidebar_right: SidebarFrame = None
+        self._sidebar_left: QFrame = None
+        self._sidebar_right: QFrame = None
         self._panel_left: QFrame = None
         self._panel_right: QFrame = None
 
@@ -9464,7 +9465,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
                     )
                 except Exception as _e:
                     import traceback as _tb
-                    from badwords_log import log_error as _le
+                    from osdoc import log_error as _le
                     _le(f"_AssemblyThread: {_e}\n{_tb.format_exc()}")
                     result = (False, None, None, None)
                 self._sigs.finished.emit(result)
