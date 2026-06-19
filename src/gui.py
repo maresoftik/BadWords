@@ -8232,6 +8232,12 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         btn_row_script.addWidget(self.btn_clear_script)
         l_script_analysis.addLayout(btn_row_script)
         
+        self.btn_analyze_standalone = QPushButton(self.txt("btn_analyze_standalone"))
+        self.btn_analyze_standalone.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_analyze_standalone.setFixedHeight(35)
+        self.btn_analyze_standalone.setEnabled(False)
+        l_script_analysis.addWidget(self.btn_analyze_standalone)
+
         self.btn_analyze_compare = QPushButton(self.txt("btn_analyze_compare"))
         self.btn_analyze_compare.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_analyze_compare.setFixedHeight(35)
@@ -8249,18 +8255,20 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         )
         l_script_analysis.addWidget(self.btn_side_by_side_compare)
         
+        self.btn_exit_sbs_text = QPushButton(self.txt("btn_return_normal"))
+        self.btn_exit_sbs_text.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_exit_sbs_text.setStyleSheet("QPushButton { background: transparent; color: #808080; text-decoration: underline; border: none; padding: 10px; font-size: 11pt; } QPushButton:hover { color: #ffffff; }")
+        self.btn_exit_sbs_text.clicked.connect(self._exit_side_by_side)
+        self.btn_exit_sbs_text.hide()
+        l_script_analysis.addWidget(self.btn_exit_sbs_text)
+        
         self._analyze_color_anim = QVariantAnimation(self)
         self._analyze_color_anim.setDuration(250)
 
         def update_btn_style(color):
-            self.btn_analyze_compare.setStyleSheet(f"QPushButton {{ background-color: {color.name()}; border: 1px solid #111; border-radius: 4px; color: #fff; font-weight: bold; padding: 8px; }}")
+            style = f"QPushButton {{ background-color: {color.name()}; border: 1px solid #111; border-radius: 4px; color: #fff; font-weight: bold; padding: 8px; }}"
+            self.btn_analyze_compare.setStyleSheet(style)
         self._analyze_color_anim.valueChanged.connect(update_btn_style)
-        
-        self.btn_analyze_standalone = QPushButton(self.txt("btn_analyze_standalone"))
-        self.btn_analyze_standalone.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_analyze_standalone.setFixedHeight(35)
-        self.btn_analyze_standalone.setEnabled(False)
-        l_script_analysis.addWidget(self.btn_analyze_standalone)
         
         self.activities["script_analysis"] = _wrap_activity(p_script_analysis)
         
@@ -8284,8 +8292,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             self._analyze_color_anim.setEndValue(end_color)
             self._analyze_color_anim.start()
             
-        self.text_script.textChanged.connect(update_compare_btn)
-        update_compare_btn()
+        self._update_compare_btn = update_compare_btn
+        self.text_script.textChanged.connect(self._update_compare_btn)
+        self._update_compare_btn()
 
         # B. silence
         p_silence = QWidget()
@@ -8485,13 +8494,6 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         # Middle
         l_main.addStretch(1)
         
-        self.btn_return_normal = QPushButton(self.txt("btn_return_normal"))
-        self.btn_return_normal.setFixedHeight(32)
-        self.btn_return_normal.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_return_normal.setStyleSheet("QPushButton { background-color: #11703c; color: white; font-weight: bold; border-radius: 4px; border: 1px solid #0a4d28; } QPushButton:hover { background-color: #168f4d; } QPushButton:pressed { background-color: #0d5c31; }")
-        self.btn_return_normal.clicked.connect(self._exit_side_by_side)
-        self.btn_return_normal.hide()
-        l_main.addWidget(self.btn_return_normal)
         
         # Analysis duration label
         self.lbl_analysis_duration = QLabel("")
@@ -8708,6 +8710,10 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self._show_transcript_view()
 
     def _on_side_by_side_compare(self):
+        if getattr(self, '_is_sbs_active', False):
+            self._exit_side_by_side()
+            return
+
         script_text = self.text_script.toPlainText().strip()
         if not script_text:
             dlg = CustomMsgBox(self, self.txt("msg_warning"), self.txt("msg_please_import_or_paste_a"), self.txt("btn_ok"))
@@ -8719,7 +8725,17 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             dlg.exec()
             return
 
-        # Instantly close left panel by deactivating all left sidebar buttons
+        self._is_sbs_active = True
+
+        self.text_script.hide()
+        self.btn_import_script.hide()
+        self.btn_clear_script.hide()
+        self.btn_analyze_compare.hide()
+        self.btn_analyze_standalone.hide()
+        self.btn_side_by_side_compare.hide()
+
+        self.btn_exit_sbs_text.show()
+
         for widget in self.findChildren(SidebarButton):
             if not widget.is_right_side and widget.is_active:
                 widget.set_active(False)
@@ -8727,7 +8743,13 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self._sbs_left_sizes = self._main_h_splitter.sizes()
         self._panel_left.hide()
 
-        self.btn_return_normal.show()
+        if getattr(self, '_sbs_last_script', None) == script_text and getattr(self, '_sbs_cached_rows', None) is not None:
+            self.text_canvas.is_sbs_mode = True
+            self.text_canvas.sbs_rows = self._sbs_cached_rows
+            self.text_canvas._calculate_layout()
+            self.text_canvas.update()
+            self._show_transcript_view()
+            return
 
         # Delayed processing with loading overlay in case it takes long
         self._sbs_loading_shown = False
@@ -8758,6 +8780,8 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self.text_canvas.words_data = updated_words
 
         rows = algorithms.build_side_by_side_alignment(script_text, updated_words)
+        self._sbs_last_script = script_text
+        self._sbs_cached_rows = rows
         
         self.text_canvas.is_sbs_mode = True
         self.text_canvas.sbs_rows = rows
@@ -8773,6 +8797,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             self.sbs_loading_overlay.hide()
 
     def _exit_side_by_side(self):
+        self._is_sbs_active = False
         self.text_canvas.is_sbs_mode = False
         if hasattr(self.text_canvas, 'sbs_editors'):
             for ed in self.text_canvas.sbs_editors:
@@ -8780,8 +8805,15 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self.text_canvas._calculate_layout()
         self.text_canvas.update()
         
-        self.btn_return_normal.hide()
-        
+        self.btn_exit_sbs_text.hide()
+
+        self.text_script.show()
+        self.btn_import_script.show()
+        self.btn_clear_script.show()
+        self.btn_analyze_compare.show()
+        self.btn_analyze_standalone.show()
+        self.btn_side_by_side_compare.show()
+
         # Restore left panel
         if getattr(self, '_sbs_left_was_visible', False):
             self._panel_left.show()
