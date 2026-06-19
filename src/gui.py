@@ -967,8 +967,64 @@ class ShortcutCaptureButton(QPushButton):
                 self._apply_style()
 
 
+class MouseShortcutCaptureButton(ShortcutCaptureButton):
+    def __init__(self, current_sequence, key_map, display_only=False, parent=None):
+        self.key_map = key_map
+        super().__init__(current_sequence, display_only, parent)
 
+    def _update_label(self):
+        if self.display_only:
+            self.setText(self.key_map.get(self.current_seq, self.current_seq) if self.current_seq else "—")
+        else:
+            if self.capturing:
+                self.setText("...")
+            else:
+                self.setText(self.key_map.get(self.current_seq, self.current_seq) if self.current_seq else "(none)")
 
+    def mousePressEvent(self, event):
+        from PySide6.QtCore import Qt
+        if not self.capturing:
+            super().mousePressEvent(event)
+            return
+
+        mods = event.modifiers()
+        btn = event.button()
+
+        mod_str = None
+        if mods & Qt.KeyboardModifier.ControlModifier:
+            mod_str = "opt_ctrl"
+        elif mods & Qt.KeyboardModifier.AltModifier:
+            mod_str = "opt_alt"
+        elif mods & Qt.KeyboardModifier.ShiftModifier:
+            mod_str = "opt_shift"
+
+        btn_str = None
+        if btn == Qt.LeftButton:
+            btn_str = "lmb"
+        elif btn == Qt.RightButton:
+            btn_str = "rmb"
+
+        if mod_str and btn_str:
+            seq = f"{mod_str}_{btn_str}"
+            if seq in self.key_map:
+                self.current_seq = seq
+                self.capturing = False
+                self._apply_style()
+                self._update_label()
+                self.clearFocus()
+                self.sequence_changed.emit(seq)
+
+    def keyPressEvent(self, event):
+        from PySide6.QtCore import Qt
+        if not self.capturing:
+            super().keyPressEvent(event)
+            return
+            
+        if event.key() == Qt.Key_Escape:
+            self.capturing = False
+            self._apply_style()
+            self._update_label()
+            self.clearFocus()
 class SearchOverlayWidget(QFrame):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget)
@@ -2292,6 +2348,25 @@ class TranscriptionCanvas(QWidget):
 
 
     def mousePressEvent(self, event):
+        prefs = getattr(self.main_window.engine, 'load_preferences', lambda: {})() or {}
+        shortcuts = prefs.get('shortcuts', getattr(config, 'DEFAULT_SETTINGS', {}).get('shortcuts', {}))
+        jump_opt = shortcuts.get('jump_to_word', 'opt_ctrl_rmb')
+        
+        expected_btn = Qt.RightButton if 'rmb' in jump_opt else Qt.LeftButton
+        
+        if 'ctrl' in jump_opt: expected_mod = Qt.KeyboardModifier.ControlModifier
+        elif 'alt' in jump_opt: expected_mod = Qt.KeyboardModifier.AltModifier
+        elif 'shift' in jump_opt: expected_mod = Qt.KeyboardModifier.ShiftModifier
+        else: expected_mod = Qt.KeyboardModifier.ControlModifier
+        
+        if event.button() == expected_btn:
+            if event.modifiers() == expected_mod:
+                for w in self._cached_visible_words:
+                    if '_rect' in w and w['_rect'].adjusted(-3, -1, 3, 1).contains(event.pos()):
+                        if hasattr(self.main_window, '_jump_playhead'):
+                            self.main_window._jump_playhead(w.get('start', 0.0))
+                return
+
         if event.button() == Qt.LeftButton:
             self._last_dragged_id = -1
             self._current_undo_action = {"type": "paint", "changes": {}}
@@ -5236,7 +5311,22 @@ class UnsavedChangesDialog(FramelessWindowMixin, _BaseDialog):
             
             fname = key_name_map.get(k, k.replace('_', ' ').title())
             lbl_name = QLabel(f"{fname}:")
-            lbl_val = QLabel(f"<b>{new_v}</b>")
+            
+            if isinstance(new_v, bool):
+                display_val = parent.txt('btn_yes') if new_v else parent.txt('btn_no')
+            elif isinstance(new_v, list):
+                t_list = []
+                for item in new_v:
+                    t = parent.txt(str(item))
+                    t_list.append(t if t != str(item) else str(item).replace('_', ' ').title())
+                display_val = ", ".join(t_list) if t_list else "—"
+            elif isinstance(new_v, str):
+                t = parent.txt(new_v)
+                display_val = t if t != new_v else new_v
+            else:
+                display_val = str(new_v)
+                
+            lbl_val = QLabel(f"<b>{display_val}</b>")
             lbl_val.setStyleSheet("color: #aaa;")
             
             btn_save = QPushButton(parent.txt('btn_save'))
@@ -5570,6 +5660,8 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
 
     def _set_view_mode(self, mode):
         self.engine.save_preferences({'settings_view_mode': mode})
+        if hasattr(self, '_initial_state'):
+            self._initial_state['settings_view_mode'] = mode
         self._build_ui()
 
     def _build_ui(self):
@@ -6082,11 +6174,12 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
 
 
         # Builds label + field container for one shortcut row (used for addRow and insertRow)
-        def _make_shortcut_widgets(label_text, widget, default_val, setter_func, is_display=False):
+        def _make_shortcut_widgets(label_text, widget, default_val, setter_func, is_display=False, info_key=None):
             container = QWidget()
             row = QHBoxLayout(container)
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(6)
+            
             widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             row.addWidget(widget)
 
@@ -6111,6 +6204,19 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
 
             lbl = QLabel(label_text)
             lbl.setWordWrap(True)
+            
+            if info_key:
+                lbl_container = QWidget()
+                lbl_container.setMinimumWidth(200)
+                lbl_layout = QHBoxLayout(lbl_container)
+                lbl_layout.setContentsMargins(0, 0, 0, 0)
+                lbl_layout.setSpacing(6)
+                info_icon = self.parent()._create_info_icon(info_key)
+                lbl_layout.addWidget(lbl)
+                lbl_layout.addWidget(info_icon)
+                lbl_layout.addStretch()
+                return lbl_container, container
+
             lbl.setMinimumWidth(200)
             return lbl, container
 
@@ -6122,7 +6228,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         MARKER_KEYS  = {'mark_red', 'mark_blue', 'mark_green', 'mark_eraser',
                         'jump_to_word', 'play_stop'}
         NAV_KEYS     = {'search', 'open_settings'}
-        DISPLAY_ONLY = {'jump_to_word', 'play_stop'}
+        DISPLAY_ONLY = {'play_stop'}
         KEY_ORDER    = ['mark_red', 'mark_blue', 'mark_green', 'mark_eraser',
                         'jump_to_word', 'play_stop', 'search', 'open_settings']
 
@@ -6149,11 +6255,21 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             value      = current_shortcuts[key]
             i18n_key   = f'shortcut_{key}'
             label_text = self.txt(i18n_key) if self.txt(i18n_key) != i18n_key else key.replace('_', ' ').title()
-            widget = ShortcutCaptureButton(str(value), display_only=is_disp)
-            widget.sequence_changed.connect(lambda _seq, _w=widget: _check_shortcut_conflicts())
-            lbl, container = _make_shortcut_widgets(label_text, widget, default_shortcuts.get(key, ''),
-                                                     make_setter(widget, _check_shortcut_conflicts),
-                                                     is_display=is_disp)
+            
+            if key == 'jump_to_word':
+                opts_keys = ['opt_ctrl_lmb', 'opt_ctrl_rmb', 'opt_alt_lmb', 'opt_alt_rmb', 'opt_shift_lmb', 'opt_shift_rmb']
+                key_map = {k: self.txt(k) for k in opts_keys}
+                widget = MouseShortcutCaptureButton(str(value), key_map, display_only=is_disp)
+                widget.sequence_changed.connect(lambda _seq, _w=widget: _check_shortcut_conflicts())
+                lbl, container = _make_shortcut_widgets(label_text, widget, default_shortcuts.get(key, 'opt_ctrl_lmb'),
+                                                         make_setter(widget, _check_shortcut_conflicts),
+                                                         is_display=is_disp, info_key='tt_jump_to_word_info')
+            else:
+                widget = ShortcutCaptureButton(str(value), display_only=is_disp)
+                widget.sequence_changed.connect(lambda _seq, _w=widget: _check_shortcut_conflicts())
+                lbl, container = _make_shortcut_widgets(label_text, widget, default_shortcuts.get(key, ''),
+                                                         make_setter(widget, _check_shortcut_conflicts),
+                                                         is_display=is_disp)
             form.addRow(lbl, container)
             self.shortcut_inputs[key] = widget
 
@@ -8377,6 +8493,13 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self.btn_return_normal.hide()
         l_main.addWidget(self.btn_return_normal)
         
+        # Analysis duration label
+        self.lbl_analysis_duration = QLabel("")
+        self.lbl_analysis_duration.setStyleSheet("color: #a0a0a0; font-size: 9pt; font-style: italic;")
+        self.lbl_analysis_duration.setAlignment(Qt.AlignCenter)
+        self.lbl_analysis_duration.setVisible(False)
+        l_main.addWidget(self.lbl_analysis_duration)
+        
         # Favorites section
         self.lbl_pinned_favorites = QLabel(self.txt("lbl_pinned_favorites"))
         self.lbl_pinned_favorites.setStyleSheet("color: #888888; font-size: 8pt; font-weight: bold; text-transform: uppercase;")
@@ -8516,6 +8639,28 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
     # ------------------------------------------------------------------
     # UI Logic Methods
     # ------------------------------------------------------------------
+
+    def _jump_playhead(self, timestamp_s):
+        if not self.engine.resolve_handler or not getattr(self.engine.resolve_handler, 'project', None): return
+        
+        tl_name = None
+        if getattr(self, '_current_chapter_idx', -1) >= 0 and self._chapters:
+            tl_name = self._chapters[self._current_chapter_idx].get("tl_name")
+        elif getattr(self, '_transcription_source', None):
+            tl_name = self._transcription_source.get("timeline_name")
+            
+        if tl_name:
+            curr_tl = self.engine.resolve_handler.project.GetCurrentTimeline()
+            if not curr_tl or curr_tl.GetName() != tl_name:
+                count = self.engine.resolve_handler.project.GetTimelineCount()
+                for i in range(1, count + 1):
+                    tl = self.engine.resolve_handler.project.GetTimelineByIndex(i)
+                    if tl and tl.GetName() == tl_name:
+                        self.engine.resolve_handler.project.SetCurrentTimeline(tl)
+                        self.engine.resolve_handler.timeline = tl
+                        break
+        
+        self.engine.resolve_handler.jump_to_seconds(timestamp_s)
 
     def _on_import_script(self):
         from PySide6.QtWidgets import QFileDialog
@@ -10398,6 +10543,8 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
 
         
         # 4. Start QThread targeting self.engine.run_analysis_pipeline()
+        import time
+        self._transcription_start_time = time.time()
         self._analysis_worker = AnalysisWorker(self.engine, 'run_analysis_pipeline', settings)
         self._analysis_worker.progress.connect(self._on_analysis_progress)
         self._analysis_worker.status.connect(self._on_analysis_status)
@@ -10510,6 +10657,14 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             _log_error(f"Could not persist transcription_source: {_e}")
 
         self._populate_editor(words_data, segments_data)
+        
+        if hasattr(self, '_transcription_start_time'):
+            import time
+            elapsed = int(time.time() - self._transcription_start_time)
+            mins = elapsed // 60
+            secs = elapsed % 60
+            self.lbl_analysis_duration.setText(self.txt("txt_analyzed_in").replace("{time}", f"{mins}:{secs:02d}"))
+            self.lbl_analysis_duration.setVisible(True)
 
 
     def _on_nav_markers(self):
