@@ -5690,16 +5690,15 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
 
         if is_basic:
             self.category_list.addItem(self.txt("tab_general"))
+            self.category_list.addItem(self.txt("tab_transcript"))
             self.category_list.addItem(self.txt("tab_shortcuts"))
             self.category_list.addItem(self.txt("tab_custom_markers"))
-            self.category_list.addItem(self.txt("tab_transcript"))
             self.category_list.addItem(self.txt("tab_telemetry"))
         else:
             self.category_list.addItem(self.txt("tab_general"))
+            self.category_list.addItem(self.txt("tab_transcript"))
             self.category_list.addItem(self.txt("tab_shortcuts"))
             self.category_list.addItem(self.txt("tab_custom_markers"))
-            self.category_list.addItem(self.txt("tab_transcript"))
-            self.category_list.addItem(self.txt("tab_interface"))
             self.category_list.addItem(self.txt("tab_ai_engine"))
             self.category_list.addItem(self.txt("tab_algorithms"))
             self.category_list.addItem(self.txt("tab_audio_sync"))
@@ -5733,14 +5732,17 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self.revert_funcs.append(lambda d=default_val, s=setter_func: s(d))
             return lbl, container
 
-        def _add_page_to_stack(page_widget):
+        def _add_page_to_stack(page_widget, index=-1):
             scroll = QScrollArea()
             scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.NoFrame)
             scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
             scroll.setWidget(page_widget)
-            self.stack.addWidget(scroll)
+            if index == -1:
+                self.stack.addWidget(scroll)
+            else:
+                self.stack.insertWidget(index, scroll)
 
         # ─────────────────────────────────────────────────────────────────
         # PAGE 0 — GENERAL
@@ -5772,17 +5774,10 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         btn_view_advanced.setFixedHeight(30)
         btn_view_advanced.setCursor(Qt.PointingHandCursor)
         
-        import os
-        has_dev = os.path.exists(os.path.join(self.engine.os_doc.install_dir, "dev.json"))
-        
         if view_mode == 'advanced':
             btn_view_advanced.setStyleSheet(active_btn_style)
         else:
             btn_view_advanced.setStyleSheet(inactive_btn_style)
-            
-        if not has_dev:
-            btn_view_advanced.setEnabled(False)
-            btn_view_advanced.setToolTip(self.txt("tt_advanced_locked"))
             
         btn_view_advanced.clicked.connect(lambda: self._set_view_mode('advanced'))
 
@@ -6237,12 +6232,11 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             form.addRow(lbl, container)
 
         # Keys and their ordering in the final form
-        MARKER_KEYS  = {'mark_red', 'mark_blue', 'mark_green', 'mark_eraser',
-                        'jump_to_word', 'play_stop'}
-        NAV_KEYS     = {'search', 'open_settings'}
-        DISPLAY_ONLY = {'play_stop'}
+        MARKER_KEYS  = {'mark_red', 'mark_blue', 'mark_green', 'mark_eraser'}
+        NAV_KEYS     = {'search', 'open_settings', 'jump_to_word'}
+        DISPLAY_ONLY = set()
         KEY_ORDER    = ['mark_red', 'mark_blue', 'mark_green', 'mark_eraser',
-                        'jump_to_word', 'play_stop', 'search', 'open_settings']
+                        'search', 'open_settings', 'jump_to_word']
 
         def make_setter(w, check_fn):
             def _setter(v):
@@ -6293,18 +6287,31 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         self._add_shortcut_row_fn         = _add_shortcut_row
         self.custom_marker_shortcut_inputs = {}
 
-        # Nav shortcuts (search, open_settings)
+        # Nav shortcuts (search, open_settings, jump_to_word)
         for key in KEY_ORDER:
             if key not in NAV_KEYS or key not in current_shortcuts:
+                continue
+            is_disp = key in DISPLAY_ONLY
+            if is_basic and is_disp:
                 continue
             value      = current_shortcuts[key]
             i18n_key   = f'shortcut_{key}'
             label_text = self.txt(i18n_key) if self.txt(i18n_key) != i18n_key else key.replace('_', ' ').title()
-            widget = ShortcutCaptureButton(str(value), display_only=False)
-            widget.sequence_changed.connect(lambda _seq, _w=widget: _check_shortcut_conflicts())
-            lbl, container = _make_shortcut_widgets(label_text, widget, default_shortcuts.get(key, ''),
-                                                     make_setter(widget, _check_shortcut_conflicts),
-                                                     is_display=False)
+            
+            if key == 'jump_to_word':
+                opts_keys = ['opt_ctrl_lmb', 'opt_ctrl_rmb', 'opt_alt_lmb', 'opt_alt_rmb', 'opt_shift_lmb', 'opt_shift_rmb']
+                key_map = {k: self.txt(k) for k in opts_keys}
+                widget = MouseShortcutCaptureButton(str(value), key_map, display_only=is_disp)
+                widget.sequence_changed.connect(lambda _seq, _w=widget: _check_shortcut_conflicts())
+                lbl, container = _make_shortcut_widgets(label_text, widget, default_shortcuts.get(key, 'opt_ctrl_lmb'),
+                                                         make_setter(widget, _check_shortcut_conflicts),
+                                                         is_display=is_disp, info_key='tt_jump_to_word_info')
+            else:
+                widget = ShortcutCaptureButton(str(value), display_only=is_disp)
+                widget.sequence_changed.connect(lambda _seq, _w=widget: _check_shortcut_conflicts())
+                lbl, container = _make_shortcut_widgets(label_text, widget, default_shortcuts.get(key, ''),
+                                                         make_setter(widget, _check_shortcut_conflicts),
+                                                         is_display=is_disp)
             form.addRow(lbl, container)
             self.shortcut_inputs[key] = widget
 
@@ -6393,6 +6400,28 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         l_transcript = QVBoxLayout(page_transcript)
         l_transcript.setContentsMargins(24, 20, 24, 16)
         l_transcript.setSpacing(0)
+
+        if not is_basic:
+            form_ontop = QFormLayout()
+            form_ontop.setSpacing(14)
+            form_ontop.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            
+            self.chk_ontop = ToggleSwitch()
+            self.chk_ontop.setChecked(bool(prefs.get('always_on_top', False)), animated=False)
+            w_ontop = QWidget()
+            l_ontop = QHBoxLayout(w_ontop)
+            l_ontop.setContentsMargins(0, 0, 0, 0)
+            l_ontop.addStretch()
+            l_ontop.addWidget(self.parent()._create_info_icon("tt_always_on_top"))
+            l_ontop.addSpacing(6)
+            l_ontop.addWidget(self.chk_ontop)
+            
+            _add_row(form_ontop, self.txt("lbl_always_on_top"), w_ontop,
+                     False, lambda v: self.chk_ontop.setChecked(v, animated=False))
+            l_transcript.addLayout(form_ontop)
+            
+            l_transcript.addSpacing(14)
+
         form_transcript = QFormLayout()
         form_transcript.setSpacing(14)
         form_transcript.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -6437,55 +6466,10 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         l_transcript.addWidget(self.lbl_preview)
 
 
-        if not is_basic:
-            # Separator before chunking settings
-            sep_chunk = QFrame()
-            sep_chunk.setFrameShape(QFrame.Shape.HLine)
-            sep_chunk.setStyleSheet("background-color: #3a3a3a; max-height: 1px; border: none;")
-            l_transcript.addSpacing(12)
-            l_transcript.addWidget(sep_chunk)
-            l_transcript.addSpacing(10)
-
-        # Chunking spinboxes — Advanced view only
-        if not is_basic:
-            form_chunk = QFormLayout()
-            form_chunk.setSpacing(14)
-            form_chunk.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-
-            self.spin_chunk_max = QSpinBox()
-            self.spin_chunk_max.setRange(5, 200)
-            self.spin_chunk_max.setValue(int(prefs.get('chunk_max_words', 30)))
-            _add_row(form_chunk, self.txt("lbl_chunk_max_words"), self.spin_chunk_max, 30, self.spin_chunk_max.setValue)
-
-            self.spin_chunk_look = QSpinBox()
-            self.spin_chunk_look.setRange(0, 20)
-            self.spin_chunk_look.setValue(int(prefs.get('chunk_lookahead', 3)))
-            _add_row(form_chunk, self.txt("lbl_chunk_lookahead"), self.spin_chunk_look, 3, self.spin_chunk_look.setValue)
-
-            self.spin_chunk_min = QSpinBox()
-            self.spin_chunk_min.setRange(1, 50)
-            self.spin_chunk_min.setValue(int(prefs.get('chunk_min_chars', 7)))
-            _add_row(form_chunk, self.txt("lbl_chunk_min_chars"), self.spin_chunk_min, 7, self.spin_chunk_min.setValue)
-
-            l_transcript.addLayout(form_chunk)
-
-            # Enable/disable chunk spinboxes based on view mode
-            def _update_chunk_state(idx):
-                enabled = (idx == 1)  # 1 = Segmented
-                self.spin_chunk_max.setEnabled(enabled)
-                self.spin_chunk_look.setEnabled(enabled)
-                self.spin_chunk_min.setEnabled(enabled)
-            self.combo_view.valueChanged.connect(lambda v: _update_chunk_state(1 if v == self.txt("opt_segmented_blocks") else 0))
-            _update_chunk_state(1 if self.combo_view.currentText() == self.txt("opt_segmented_blocks") else 0)
-
+        # Removed sep_chunk
         # ── Sync DaVinci timeline on chapter switch ─ BOTTOM of Transcript tab
         # (below font preview and chunking settings, applies to both basic/advanced)
-        l_transcript.addSpacing(12)
-        sep_sync = QFrame()
-        sep_sync.setFrameShape(QFrame.Shape.HLine)
-        sep_sync.setStyleSheet("background-color: #3a3a3a; max-height: 1px; border: none;")
-        l_transcript.addWidget(sep_sync)
-        l_transcript.addSpacing(10)
+        l_transcript.addSpacing(14)
 
         form_bottom = QFormLayout()
         form_bottom.setSpacing(14)
@@ -6542,60 +6526,46 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
                  False, lambda v: self.tgl_timestamp_precise.setChecked(v, animated=False))
 
         l_transcript.addLayout(form_bottom)
-        l_transcript.addStretch()
+        l_transcript.addSpacing(14)
 
         self.combo_font.valueChanged.connect(self._update_preview)
         self.spin_fsize.valueChanged.connect(self._update_preview)
         self.spin_lheight.valueChanged.connect(self._update_preview)
         self._update_preview()
-        _add_page_to_stack(page_transcript)
-
-        # ─────────────────────────────────────────────────────────────────
+        # Chunking spinboxes — Advanced view only
         if not is_basic:
-            # PAGE 4 — INTERFACE
-        # ─────────────────────────────────────────────────────────────────
-            page_iface = QWidget()
-            page_iface.setStyleSheet("background: transparent;")
-            l_iface = QVBoxLayout(page_iface)
-            l_iface.setContentsMargins(24, 20, 24, 16)
-            l_iface.setSpacing(0)
-            form_iface = QFormLayout()
-            form_iface.setSpacing(14)
-            form_iface.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            form_chunk = QFormLayout()
+            form_chunk.setSpacing(14)
+            form_chunk.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
-            # Always on top
-            self.chk_ontop = ToggleSwitch()
-            self.chk_ontop.setChecked(bool(prefs.get('always_on_top', True)), animated=False)
-            _add_row(form_iface, self.txt("lbl_always_on_top"), self.chk_ontop,
-                     False, lambda v: self.chk_ontop.setChecked(v, animated=False))
+            self.spin_chunk_max = QSpinBox()
+            self.spin_chunk_max.setRange(5, 200)
+            self.spin_chunk_max.setValue(int(prefs.get('chunk_max_words', 30)))
+            _add_row(form_chunk, self.txt("lbl_chunk_max_words"), self.spin_chunk_max, 30, self.spin_chunk_max.setValue)
 
-            # Hidden panels (multi-select)
-            _panel_options = ["Script Analysis", "Silence", "Filler Words", "Assembly"]
-            self.dropdown_hidden = MultiSelectDropdown(_panel_options)
-            self.dropdown_hidden.setFixedHeight(30)
-            saved_hidden = prefs.get('hidden_panels', [])
-            if isinstance(saved_hidden, list) and saved_hidden:
-                self.dropdown_hidden.selected_items = set(saved_hidden)
-                self.dropdown_hidden.setText(", ".join(sorted(saved_hidden)))
-            else:
-                self.dropdown_hidden.setText(self.txt("txt_select"))
-            _add_row(form_iface, self.txt("lbl_hidden_panels"), self.dropdown_hidden,
-                     [], lambda v: None)  # revert placeholder — clear handled by Restore Defaults
+            self.spin_chunk_look = QSpinBox()
+            self.spin_chunk_look.setRange(0, 20)
+            self.spin_chunk_look.setValue(int(prefs.get('chunk_lookahead', 3)))
+            _add_row(form_chunk, self.txt("lbl_chunk_lookahead"), self.spin_chunk_look, 3, self.spin_chunk_look.setValue)
 
-            # Accent Color
-            _accent_items = ["green", "blue", "purple", "orange"]
-            self.dropdown_accent = CustomDropdown(_accent_items)
-            self.dropdown_accent.setFixedHeight(30)
-            saved_accent = prefs.get('accent_color', 'green')
-            self.dropdown_accent.setText(saved_accent if saved_accent in _accent_items else 'green')
-            _add_row(form_iface, self.txt("lbl_accent_color"), self.dropdown_accent, 'green', self.dropdown_accent.setValue)
+            self.spin_chunk_min = QSpinBox()
+            self.spin_chunk_min.setRange(1, 50)
+            self.spin_chunk_min.setValue(int(prefs.get('chunk_min_chars', 7)))
+            _add_row(form_chunk, self.txt("lbl_chunk_min_chars"), self.spin_chunk_min, 7, self.spin_chunk_min.setValue)
 
-            l_iface.addLayout(form_iface)
-            l_iface.addStretch()
-            _add_page_to_stack(page_iface)
+            l_transcript.addLayout(form_chunk)
 
-        
-        
+            # Enable/disable chunk spinboxes based on view mode
+            def _update_chunk_state(idx):
+                enabled = (idx == 1)  # 1 = Segmented
+                self.spin_chunk_max.setEnabled(enabled)
+                self.spin_chunk_look.setEnabled(enabled)
+                self.spin_chunk_min.setEnabled(enabled)
+            self.combo_view.valueChanged.connect(lambda v: _update_chunk_state(1 if v == self.txt("opt_segmented_blocks") else 0))
+            _update_chunk_state(1 if self.combo_view.currentText() == self.txt("opt_segmented_blocks") else 0)
+
+        l_transcript.addStretch()
+        _add_page_to_stack(page_transcript, 1)
 
         # ─────────────────────────────────────────────────────────────────
         if not is_basic:
@@ -6680,13 +6650,13 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
 
             self.chk_vad_filter = ToggleSwitch()
             self.chk_vad_filter.setChecked(bool(prefs.get('ai_vad_filter', False)), animated=False)
-            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_vad_filter"), self.chk_vad_filter,
-                     False, lambda v: self.chk_vad_filter.setChecked(v, animated=False)))
+            w_vad = QWidget(); l_vad = QHBoxLayout(w_vad); l_vad.setContentsMargins(0, 0, 0, 0); l_vad.addStretch(); l_vad.addWidget(self.chk_vad_filter)
+            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_vad_filter"), w_vad, False, lambda v: self.chk_vad_filter.setChecked(v, animated=False)))
 
             self.chk_condition_prev = ToggleSwitch()
             self.chk_condition_prev.setChecked(bool(prefs.get('ai_condition_on_prev', False)), animated=False)
-            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_condition_prev"), self.chk_condition_prev,
-                     False, lambda v: self.chk_condition_prev.setChecked(v, animated=False)))
+            w_cond = QWidget(); l_cond = QHBoxLayout(w_cond); l_cond.setContentsMargins(0, 0, 0, 0); l_cond.addStretch(); l_cond.addWidget(self.chk_condition_prev)
+            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_condition_prev"), w_cond, False, lambda v: self.chk_condition_prev.setChecked(v, animated=False)))
 
             self.spin_beam_size = QSpinBox()
             self.spin_beam_size.setRange(1, 10)
@@ -6711,8 +6681,8 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self.spin_no_speech.setRange(0.0, 1.0)
             self.spin_no_speech.setSingleStep(0.1)
             self.spin_no_speech.setDecimals(2)
-            self.spin_no_speech.setValue(float(prefs.get('ai_no_speech_threshold', 0.2)))
-            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_no_speech"), self.spin_no_speech, 0.2, self.spin_no_speech.setValue))
+            self.spin_no_speech.setValue(float(prefs.get('ai_no_speech_threshold', 0.6)))
+            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_no_speech"), self.spin_no_speech, 0.6, self.spin_no_speech.setValue))
 
             self.spin_patience = QDoubleSpinBox()
             self.spin_patience.setRange(0.0, 10.0)
@@ -6725,8 +6695,8 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self.spin_compression.setRange(0.0, 100.0)
             self.spin_compression.setSingleStep(0.1)
             self.spin_compression.setDecimals(2)
-            self.spin_compression.setValue(float(prefs.get('ai_compression_ratio_threshold', 10.0)))
-            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_compression_ratio"), self.spin_compression, 10.0, self.spin_compression.setValue))
+            self.spin_compression.setValue(float(prefs.get('ai_compression_ratio_threshold', 2.4)))
+            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_compression_ratio"), self.spin_compression, 2.4, self.spin_compression.setValue))
 
             self.spin_no_repeat = QSpinBox()
             self.spin_no_repeat.setRange(0, 100)
@@ -6735,13 +6705,13 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
 
             self.chk_regroup = ToggleSwitch()
             self.chk_regroup.setChecked(bool(prefs.get('ai_regroup', False)), animated=False)
-            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_regroup"), self.chk_regroup,
-                     False, lambda v: self.chk_regroup.setChecked(v, animated=False)))
+            w_reg = QWidget(); l_reg = QHBoxLayout(w_reg); l_reg.setContentsMargins(0, 0, 0, 0); l_reg.addStretch(); l_reg.addWidget(self.chk_regroup)
+            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_regroup"), w_reg, False, lambda v: self.chk_regroup.setChecked(v, animated=False)))
 
             self.chk_suppress_silence = ToggleSwitch()
             self.chk_suppress_silence.setChecked(bool(prefs.get('ai_suppress_silence', False)), animated=False)
-            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_suppress_silence"), self.chk_suppress_silence,
-                     False, lambda v: self.chk_suppress_silence.setChecked(v, animated=False)))
+            w_supp = QWidget(); l_supp = QHBoxLayout(w_supp); l_supp.setContentsMargins(0, 0, 0, 0); l_supp.addStretch(); l_supp.addWidget(self.chk_suppress_silence)
+            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_suppress_silence"), w_supp, False, lambda v: self.chk_suppress_silence.setChecked(v, animated=False)))
 
             self.spin_q_levels = QSpinBox()
             self.spin_q_levels.setRange(0, 100)
@@ -6753,15 +6723,26 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self.spin_k_size.setValue(int(prefs.get('ai_k_size', 5)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_k_size"), self.spin_k_size, 5, self.spin_k_size.setValue))
 
+            
+            self.spin_length_penalty = QDoubleSpinBox()
+            self.spin_length_penalty.setRange(0.0, 10.0)
+            self.spin_length_penalty.setSingleStep(0.1)
+            self.spin_length_penalty.setDecimals(2)
+            self.spin_length_penalty.setValue(float(prefs.get('ai_length_penalty', 1.0)))
+            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_length_penalty") if self.txt("lbl_length_penalty") != "lbl_length_penalty" else "Length Penalty", self.spin_length_penalty, 1.0, self.spin_length_penalty.setValue))
+
+            self.spin_repetition_penalty = QDoubleSpinBox()
+            self.spin_repetition_penalty.setRange(1.0, 10.0)
+            self.spin_repetition_penalty.setSingleStep(0.1)
+            self.spin_repetition_penalty.setDecimals(2)
+            self.spin_repetition_penalty.setValue(float(prefs.get('ai_repetition_penalty', 1.0)))
+            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_repetition_penalty") if self.txt("lbl_repetition_penalty") != "lbl_repetition_penalty" else "Repetition Penalty", self.spin_repetition_penalty, 1.0, self.spin_repetition_penalty.setValue))
             l_ai.addLayout(form_whisper)
             l_ai.addStretch()
             _add_page_to_stack(page_ai)
 
-            
-
             # ─────────────────────────────────────────────────────────────────
-        if not is_basic:
-                # PAGE 5 — ALGORITHMS
+            # PAGE 6 — ALGORITHMS
             # ─────────────────────────────────────────────────────────────────
             page_algo = QWidget()
             page_algo.setStyleSheet("background: transparent;")
@@ -7397,12 +7378,6 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         except (RuntimeError, AttributeError):
             shortcuts_dict = old_prefs.get('shortcuts', {})
 
-
-        try:
-            hidden_panels_val = sorted(self.dropdown_hidden.selected_items)
-        except (RuntimeError, AttributeError):
-            hidden_panels_val = old_prefs.get('hidden_panels', [])
-
         state = {
             'gui_lang':           lang_code,
             'settings_view_mode': old_prefs.get('settings_view_mode', 'basic'),
@@ -7427,8 +7402,6 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         if not is_basic:
             state.update({
                 'always_on_top':      self._safe_get('chk_ontop', old_prefs.get('always_on_top', False), 'isChecked'),
-                'hidden_panels':      hidden_panels_val,
-                'accent_color':       self._safe_get('dropdown_accent', old_prefs.get('accent_color', 'green'), 'currentText'),
                 'device':             self._safe_get('dropdown_device', old_prefs.get('device', 'auto').capitalize(), 'currentText').lower(),
                 'ai_compute_type':    self._safe_get('dropdown_compute', old_prefs.get('ai_compute_type', 'Auto'), 'currentText'),
                 'ai_initial_prompt':  self._safe_get('textedit_prompt', old_prefs.get('ai_initial_prompt', ''), 'toPlainText'),
@@ -7444,17 +7417,19 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
                 'ai_temperature':           self._safe_get('spin_temperature', old_prefs.get('ai_temperature', 0.0), 'value'),
                 'ai_condition_on_prev':     self._safe_get('chk_condition_prev', old_prefs.get('ai_condition_on_prev', False), 'isChecked'),
                 'ai_logprob_threshold':     self._safe_get('spin_logprob', old_prefs.get('ai_logprob_threshold', -1.0), 'value'),
-                'ai_no_speech_threshold':   self._safe_get('spin_no_speech', old_prefs.get('ai_no_speech_threshold', 0.2), 'value'),
+                'ai_no_speech_threshold':   self._safe_get('spin_no_speech', old_prefs.get('ai_no_speech_threshold', 0.6), 'value'),
                 'ai_patience':              self._safe_get('spin_patience', old_prefs.get('ai_patience', 1.0), 'value'),
-                'ai_compression_ratio_threshold': self._safe_get('spin_compression', old_prefs.get('ai_compression_ratio_threshold', 10.0), 'value'),
+                'ai_compression_ratio_threshold': self._safe_get('spin_compression', old_prefs.get('ai_compression_ratio_threshold', 2.4), 'value'),
                 'ai_no_repeat_ngram_size':  self._safe_get('spin_no_repeat', old_prefs.get('ai_no_repeat_ngram_size', 0), 'value'),
                 'ai_regroup':               self._safe_get('chk_regroup', old_prefs.get('ai_regroup', False), 'isChecked'),
                 'ai_suppress_silence':      self._safe_get('chk_suppress_silence', old_prefs.get('ai_suppress_silence', False), 'isChecked'),
                 'ai_q_levels':              self._safe_get('spin_q_levels', old_prefs.get('ai_q_levels', 20), 'value'),
                 'ai_k_size':                self._safe_get('spin_k_size', old_prefs.get('ai_k_size', 5), 'value'),
+                'ai_length_penalty':        self._safe_get('spin_length_penalty', old_prefs.get('ai_length_penalty', 1.0), 'value'),
+                'ai_repetition_penalty':    self._safe_get('spin_repetition_penalty', old_prefs.get('ai_repetition_penalty', 1.0), 'value'),
             })
         else:
-            advanced_keys = ["always_on_top", "hidden_panels", "accent_color", "device", "ai_compute_type", "ai_initial_prompt", "chunk_max_words", "chunk_lookahead", "chunk_min_chars", "algo_fuzzy_threshold", "algo_retake_lookahead", "algo_distance_penalty", "algo_anchor_depth", "ai_vad_filter", "ai_beam_size", "ai_temperature", "ai_condition_on_prev", "ai_logprob_threshold", "ai_no_speech_threshold", "ai_patience", "ai_compression_ratio_threshold", "ai_no_repeat_ngram_size", "ai_regroup", "ai_suppress_silence", "ai_q_levels", "ai_k_size"]
+            advanced_keys = ["always_on_top", "device", "ai_compute_type", "ai_initial_prompt", "chunk_max_words", "chunk_lookahead", "chunk_min_chars", "algo_fuzzy_threshold", "algo_retake_lookahead", "algo_distance_penalty", "algo_anchor_depth", "ai_vad_filter", "ai_beam_size", "ai_temperature", "ai_condition_on_prev", "ai_logprob_threshold", "ai_no_speech_threshold", "ai_patience", "ai_compression_ratio_threshold", "ai_no_repeat_ngram_size", "ai_regroup", "ai_suppress_silence", "ai_q_levels", "ai_k_size", "ai_length_penalty", "ai_repetition_penalty"]
             for key in advanced_keys:
                 if key in old_prefs:
                     state[key] = old_prefs[key]
@@ -7523,14 +7498,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         
         if not is_basic:
             self._safe_set('chk_ontop', state.get('always_on_top', False), 'setChecked')
-            try:
-                if hasattr(self, 'dropdown_hidden'):
-                    self.dropdown_hidden.selected_items = set(state.get('hidden_panels', []))
-                    self.dropdown_hidden.setText(", ".join(sorted(state.get('hidden_panels', []))) if state.get('hidden_panels') else self.txt("txt_select"))
-            except RuntimeError:
-                pass
             
-            self._safe_set('dropdown_accent', state.get('accent_color', 'green'), 'setText')
             self._safe_set('dropdown_device', state.get('device', 'Auto').capitalize(), 'setText')
             self._safe_set('dropdown_compute', state.get('ai_compute_type', 'Auto'), 'setText')
             self._safe_set('textedit_prompt', state.get('ai_initial_prompt', ''), 'setPlainText')
@@ -7542,14 +7510,16 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self._safe_set('spin_temperature', state.get('ai_temperature', 0.0), 'setValue')
             self._safe_set('chk_condition_prev', state.get('ai_condition_on_prev', False), 'setChecked')
             self._safe_set('spin_logprob', state.get('ai_logprob_threshold', -1.0), 'setValue')
-            self._safe_set('spin_no_speech', state.get('ai_no_speech_threshold', 0.2), 'setValue')
+            self._safe_set('spin_no_speech', state.get('ai_no_speech_threshold', 0.6), 'setValue')
             self._safe_set('spin_patience', state.get('ai_patience', 1.0), 'setValue')
-            self._safe_set('spin_compression', state.get('ai_compression_ratio_threshold', 10.0), 'setValue')
+            self._safe_set('spin_compression', state.get('ai_compression_ratio_threshold', 2.4), 'setValue')
             self._safe_set('spin_no_repeat', state.get('ai_no_repeat_ngram_size', 0), 'setValue')
             self._safe_set('chk_regroup', state.get('ai_regroup', False), 'setChecked')
             self._safe_set('chk_suppress_silence', state.get('ai_suppress_silence', False), 'setChecked')
             self._safe_set('spin_q_levels', state.get('ai_q_levels', 20), 'setValue')
             self._safe_set('spin_k_size', state.get('ai_k_size', 5), 'setValue')
+            self._safe_set('spin_length_penalty', state.get('ai_length_penalty', 1.0), 'setValue')
+            self._safe_set('spin_repetition_penalty', state.get('ai_repetition_penalty', 1.0), 'setValue')
             self._safe_set('spin_fuzzy', state.get('algo_fuzzy_threshold', 80), 'setValue')
             self._safe_set('spin_lookahead', state.get('algo_retake_lookahead', 80), 'setValue')
             self._safe_set('spin_penalty', state.get('algo_distance_penalty', 2.0), 'setValue')
@@ -7656,14 +7626,14 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
                 'chunk_max_words': f"{self.txt('tab_transcript')}: {self.txt('lbl_chunk_max_words')}",
                 'chunk_lookahead': f"{self.txt('tab_transcript')}: {self.txt('lbl_chunk_lookahead')}",
                 'chunk_min_chars': f"{self.txt('tab_transcript')}: {self.txt('lbl_chunk_min_chars')}",
-                'always_on_top': f"{self.txt('tab_interface')}: {self.txt('lbl_always_on_top')}",
-                'hidden_panels': f"{self.txt('tab_interface')}: {self.txt('lbl_hidden_panels')}",
-                'accent_color': f"{self.txt('tab_interface')}: {self.txt('lbl_accent_color')}",
+                'always_on_top': f"{self.txt('tab_transcript')}: {self.txt('lbl_always_on_top')}",
                 'sync_davinci_chapter': f"{self.txt('tab_transcript')}: {self.txt('chk_sync_davinci')}",
                 'timestamp_precise':    f"{self.txt('tab_transcript')}: {self.txt('lbl_timestamp_precise')}",
                 'device': f"{self.txt('tab_ai_engine')}: {self.txt('lbl_device')}",
                 'ai_compute_type': f"{self.txt('tab_ai_engine')}: {self.txt('lbl_compute_type')}",
                 'ai_initial_prompt': f"{self.txt('tab_ai_engine')}: {self.txt('lbl_initial_prompt')}",
+                'ai_length_penalty': f"{self.txt('tab_ai_engine')}: Length Penalty",
+                'ai_repetition_penalty': f"{self.txt('tab_ai_engine')}: Repetition Penalty",
                 'algo_fuzzy_threshold': f"{self.txt('tab_algorithms')}: {self.txt('lbl_algo_fuzzy')}",
                 'algo_retake_lookahead': f"{self.txt('tab_algorithms')}: {self.txt('lbl_algo_lookahead')}",
                 'algo_distance_penalty': f"{self.txt('tab_algorithms')}: {self.txt('lbl_algo_penalty')}",
@@ -7847,6 +7817,10 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
 
         self._active_shortcuts = []  # track dynamic QShortcuts for cleanup
         self._apply_dynamic_shortcuts()
+
+        prefs_init = self.engine.load_preferences() or {}
+        if prefs_init.get('always_on_top'):
+            self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
 
         # --- Maximize on the monitor the cursor is on ---
         self._maximize_on_active_screen()
@@ -10972,7 +10946,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         shortcuts = {**config.DEFAULT_SETTINGS.get('shortcuts', {}), **prefs.get('shortcuts', {})}
 
         # Keys that are informational only — never register as QShortcut
-        DISPLAY_ONLY_KEYS = {'jump_to_word', 'play_stop'}
+        DISPLAY_ONLY_KEYS = {'jump_to_word'}
 
         def _make(seq, slot):
             """Helper: register one QShortcut with ApplicationShortcut context."""
