@@ -375,9 +375,9 @@ DEFAULT_SETTINGS = {
     "chunk_min_words":      7,
     "inaud_min_dur":        0.02,
     # ── Audio sync ──────────────────────────────────────────────────────────
-    "offset":               0.0,
-    "pad":                  0.0,
-    "snap_max":             0.0,
+    "offset":               -0.05,
+    "pad":                  0.05,
+    "snap_max":             0.25,
     # ── Silence detection ───────────────────────────────────────────────────
     "silence_min_dur":      0.2,    # Minimum silence duration (seconds) for FFmpeg silencedetect
     "silence_threshold_db": -42.0,  # Silence threshold in dB (both standalone and post-transcript)

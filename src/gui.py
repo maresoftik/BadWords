@@ -5700,7 +5700,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self.category_list.addItem(self.txt("tab_shortcuts"))
             self.category_list.addItem(self.txt("tab_custom_markers"))
             self.category_list.addItem(self.txt("tab_ai_engine"))
-            self.category_list.addItem(self.txt("tab_algorithms"))
+
             self.category_list.addItem(self.txt("tab_audio_sync"))
             self.category_list.addItem(self.txt("tab_telemetry"))
 
@@ -6741,44 +6741,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             l_ai.addStretch()
             _add_page_to_stack(page_ai)
 
-            # ─────────────────────────────────────────────────────────────────
-            # PAGE 6 — ALGORITHMS
-            # ─────────────────────────────────────────────────────────────────
-            page_algo = QWidget()
-            page_algo.setStyleSheet("background: transparent;")
-            l_algo = QVBoxLayout(page_algo)
-            l_algo.setContentsMargins(24, 20, 24, 16)
-            l_algo.setSpacing(0)
-            form_algo = QFormLayout()
-            form_algo.setSpacing(14)
-            form_algo.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
-            self.spin_fuzzy = QSpinBox()
-            self.spin_fuzzy.setRange(0, 100)
-            self.spin_fuzzy.setSuffix(" %")
-            self.spin_fuzzy.setValue(int(prefs.get('algo_fuzzy_threshold', 80)))
-            self._advanced_widgets.extend(_add_row(form_algo, self.txt("lbl_algo_fuzzy"), self.spin_fuzzy, 80, self.spin_fuzzy.setValue))
-
-            self.spin_lookahead = QSpinBox()
-            self.spin_lookahead.setRange(1, 300)
-            self.spin_lookahead.setValue(int(prefs.get('algo_retake_lookahead', 80)))
-            self._advanced_widgets.extend(_add_row(form_algo, self.txt("lbl_algo_lookahead"), self.spin_lookahead, 15, self.spin_lookahead.setValue))
-
-            self.spin_penalty = QDoubleSpinBox()
-            self.spin_penalty.setRange(0.0, 10.0)
-            self.spin_penalty.setSingleStep(0.1)
-            self.spin_penalty.setDecimals(1)
-            self.spin_penalty.setValue(float(prefs.get('algo_distance_penalty', 2.0)))
-            self._advanced_widgets.extend(_add_row(form_algo, self.txt("lbl_algo_penalty"), self.spin_penalty, 2.0, self.spin_penalty.setValue))
-
-            self.spin_anchor = QSpinBox()
-            self.spin_anchor.setRange(1, 10)
-            self.spin_anchor.setValue(int(prefs.get('algo_anchor_depth', 3)))
-            self._advanced_widgets.extend(_add_row(form_algo, self.txt("lbl_algo_anchor"), self.spin_anchor, 3, self.spin_anchor.setValue))
-
-            l_algo.addLayout(form_algo)
-            l_algo.addStretch()
-            _add_page_to_stack(page_algo)
 
 
         # ─────────────────────────────────────────────────────────────────
@@ -7381,9 +7344,9 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         state = {
             'gui_lang':           lang_code,
             'settings_view_mode': old_prefs.get('settings_view_mode', 'basic'),
-            'offset':             self._safe_get('spin_offset', old_prefs.get('offset', 0.0), 'value'),
-            'pad':                self._safe_get('spin_pad', old_prefs.get('pad', 0.0), 'value'),
-            'snap_max':           self._safe_get('spin_snap', old_prefs.get('snap_max', 0.0), 'value'),
+            'offset':             self._safe_get('spin_offset', old_prefs.get('offset', -0.05), 'value'),
+            'pad':                self._safe_get('spin_pad', old_prefs.get('pad', 0.05), 'value'),
+            'snap_max':           self._safe_get('spin_snap', old_prefs.get('snap_max', 0.25), 'value'),
             'app_icon':           icon_val,
             'shortcuts':          shortcuts_dict,
             'custom_markers':     getattr(self, 'current_custom_markers', old_prefs.get('custom_markers', [])),
@@ -7634,10 +7597,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
                 'ai_initial_prompt': f"{self.txt('tab_ai_engine')}: {self.txt('lbl_initial_prompt')}",
                 'ai_length_penalty': f"{self.txt('tab_ai_engine')}: Length Penalty",
                 'ai_repetition_penalty': f"{self.txt('tab_ai_engine')}: Repetition Penalty",
-                'algo_fuzzy_threshold': f"{self.txt('tab_algorithms')}: {self.txt('lbl_algo_fuzzy')}",
-                'algo_retake_lookahead': f"{self.txt('tab_algorithms')}: {self.txt('lbl_algo_lookahead')}",
-                'algo_distance_penalty': f"{self.txt('tab_algorithms')}: {self.txt('lbl_algo_penalty')}",
-                'algo_anchor_depth': f"{self.txt('tab_algorithms')}: {self.txt('lbl_algo_anchor')}",
+
                 'telemetry_opt_in': f"{self.txt('tab_telemetry')}: {self.txt('chk_telemetry_opt_in')}",
                 'telemetry_geo': f"{self.txt('tab_telemetry')}: {self.txt('chk_telemetry_geo')}",
                 'auto_check_updates': f"{self.txt('tab_general')}: {self.txt('lbl_auto_check_updates')}",
