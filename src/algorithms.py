@@ -868,77 +868,233 @@ def absorb_inaudible_into_repeats(words_data):
             i += 1
     return words_data
 
+def _fuzzy_word_eq(a, b):
+    """
+    Standalone fuzzy equality for two cleaned words.
+    Exact match OR 1-character tolerance for words >= 4 chars.
+    Uses Levenshtein-like check via SequenceMatcher for speed.
+    """
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    # Only allow fuzzy for words that are long enough to tolerate 1-char diff
+    if max(la, lb) < 4:
+        return False
+    sim = difflib.SequenceMatcher(None, a, b).ratio()
+    # For a 4-char word, 1 diff → ratio ~0.75; for 6-char → ~0.83
+    # Threshold: 0.70 to allow exactly 1-char difference in 4+ char words
+    return sim >= 0.70
+
+
 def analyze_repeats(words_data, show_inaudible=True, algo_settings=None):
-    """Legacy Standalone Analyzer (Without Script)."""
+    """
+    Standalone Human Error & Repeat Detector v4.0
+    
+    Detects human speech errors WITHOUT a reference script:
+    1. Direct Stutters (1-word repeats)
+    2. False Starts & Cut-offs (words ending in '-' or '...')
+    3. Phrase Retakes (Dynamic gap-based n-gram matching)
+    """
     if algo_settings is None:
         algo_settings = {}
-    # 1. Smart Reset - Wipeout omijający halucynacje, inaudible i ręczne poprawki
+
+    # 1. Smart Reset
     for w in words_data:
         if w.get('_is_hallucination') or w.get('type') in ['silence', 'inaudible'] or w.get('is_inaudible'):
             continue
-            
-        # Wyczyść tylko to co jest przypisane jako repeat (żeby nie psuć np. bad z engine)
         if w.get('status') == 'repeat':
-            w['status'] = w.get('manual_status') # Przywracamy warstwę bazową
+            w['status'] = w.get('manual_status')
             w['selected'] = (w['status'] in ['bad', 'inaudible', 'typo'])
             w['is_auto'] = False
 
-    # 2. Linear Flow
-    linear_flow = []
+    # 2. Build flow with raw text preservation for punctuation analysis
+    flow = []
     for idx, w in enumerate(words_data):
-        if w.get('type') in ['silence', 'inaudible']: continue
-        if w.get('is_inaudible'): continue
-        if w.get('_is_hallucination'): continue # SKIPPING HALLUCINATIONS
-        
-        txt = re.sub(r'[^\w]', '', w['text']).lower()
-        if not txt or txt in STOP_WORDS: continue
-        linear_flow.append({'text': txt, 'real_idx': idx})
-
-    n_flow = len(linear_flow)
-    marked_indices = set()
-    
-    # 3. N-gram
-    i = 0
-    LOOKAHEAD = int(algo_settings.get('algo_retake_lookahead', 30))
-    MIN_LEN = 2
-    
-    # FIX OP-02: Mapowanie pozycji słów O(n) przed pętlą zamiast O(n²) nested loop
-    from collections import defaultdict
-    word_positions = defaultdict(list)
-    for idx_flow, entry in enumerate(linear_flow):
-        word_positions[entry['text']].append(idx_flow)
-        
-    while i < n_flow:
-        curr = linear_flow[i]
-        limit = min(n_flow, i + LOOKAHEAD)
-        best_len = 0
-        best_target = -1
-        
-        # Szybkie wyszukiwanie tylko tych indeksów, które mają to samo słowo
-        potential_targets = [idx for idx in word_positions[curr['text']] if i < idx < limit]
-        
-        for j in potential_targets:
-            k = 1
-            while (i + k < n_flow) and (j + k < n_flow):
-                if linear_flow[i+k]['text'] == linear_flow[j+k]['text']: k += 1
-                else: break
+        if w.get('type') in ['silence', 'inaudible']:
+            continue
+        if w.get('is_inaudible'):
+            continue
+        if w.get('_is_hallucination'):
+            continue
             
-            if k >= MIN_LEN and k > best_len:
-                best_len = k
-                best_target = j
+        raw_text = w['text'].strip()
+        clean_text = re.sub(r'[^\w]', '', raw_text).lower()
         
-        if best_len >= MIN_LEN:
-            for m in range(best_len):
-                marked_indices.add(linear_flow[i+m]['real_idx'])
-                marked_indices.add(linear_flow[best_target+m]['real_idx'])
-        i += 1
+        if not clean_text and not raw_text:
+            continue
+            
+        flow.append({
+            'real_idx': idx,
+            'clean': clean_text,
+            'raw': raw_text,
+            'is_stop': clean_text in STOP_WORDS
+        })
 
-    count = 0
-    for idx in marked_indices:
-        words_data[idx]['status'] = 'repeat'
-        words_data[idx]['selected'] = False
-        count += 1
+    n_flow = len(flow)
+    marked_indices = set()
+
+    # PASS 1: Micro-errors (Cut-offs, Partial Words, Direct Stutters)
+    for i in range(n_flow):
+        curr = flow[i]
+        raw = curr['raw']
+        clean = curr['clean']
         
+        # A. Dash cutoffs (e.g., "archit-")
+        if raw.endswith('-') and len(clean) > 0:
+            marked_indices.add(i)
+            
+        # B. Ellipsis cutoffs (e.g., "Log... Look" or "te... touched")
+        elif raw.endswith('...') and len(clean) > 0:
+            # Check next 2 words to see if it's a restart (shares first letter)
+            for j in range(1, 3):
+                if i + j < n_flow:
+                    next_clean = flow[i+j]['clean']
+                    if len(next_clean) > 0 and clean[0] == next_clean[0]:
+                        marked_indices.add(i)
+                        break
+                        
+        # C. Direct 1-word stutters ("to to", "I I")
+        if i + 1 < n_flow:
+            next_clean = flow[i+1]['clean']
+            if clean == next_clean and len(clean) > 0:
+                marked_indices.add(i)
+                marked_indices.add(i+1)
+
+    # PASS 2: Phrase Retakes & False Starts (Dynamic Gap-based N-gram)
+    LOOKAHEAD = int(algo_settings.get('algo_retake_lookahead', 60))
+    
+    for i in range(n_flow):
+        # We don't want to start phrase matching on a pure cut-off word
+        if flow[i]['raw'].endswith('-'):
+            continue
+
+        for j in range(i + 1, min(n_flow, i + LOOKAHEAD)):
+            w_i_anchor = flow[i]['clean']
+            w_j_anchor = flow[j]['clean']
+            
+            if not w_i_anchor or not w_j_anchor:
+                continue
+                
+            # Anchor must match to even start comparing the phrase
+            if w_i_anchor != w_j_anchor and not _fuzzy_word_eq(w_i_anchor, w_j_anchor):
+                continue
+                
+            curr_i = i
+            curr_j = j
+            mismatches = 0
+            best_i = i
+            best_j = j
+            
+            # Expand match with tolerance for mismatched words inside the phrase
+            while curr_i < j and curr_j < n_flow:
+                w_i = flow[curr_i]['clean']
+                w_j = flow[curr_j]['clean']
+                
+                if not w_i or not w_j:
+                    break
+                    
+                if w_i == w_j or _fuzzy_word_eq(w_i, w_j):
+                    curr_i += 1
+                    curr_j += 1
+                    best_i = curr_i
+                    best_j = curr_j
+                else:
+                    matched_so_far = curr_i - i
+                    max_allowed = 1 if matched_so_far < 4 else 2
+                    
+                    if mismatches >= max_allowed:
+                        break
+                        
+                    recovered = False
+                    if curr_i + 1 < j and curr_j + 1 < n_flow:
+                        w_i1 = flow[curr_i+1]['clean']
+                        w_j1 = flow[curr_j+1]['clean']
+                        
+                        # Substitution recovery
+                        if w_i1 == w_j1 or _fuzzy_word_eq(w_i1, w_j1):
+                            curr_i += 2
+                            curr_j += 2
+                            mismatches += 1
+                            recovered = True
+                            best_i = curr_i
+                            best_j = curr_j
+                        # Deletion in phrase 2
+                        elif flow[curr_i]['clean'] == w_j1 or _fuzzy_word_eq(flow[curr_i]['clean'], w_j1):
+                            curr_i += 1
+                            curr_j += 2
+                            mismatches += 1
+                            recovered = True
+                            best_i = curr_i
+                            best_j = curr_j
+                        # Deletion in phrase 1
+                        elif w_i1 == flow[curr_j]['clean'] or _fuzzy_word_eq(w_i1, flow[curr_j]['clean']):
+                            curr_i += 2
+                            curr_j += 1
+                            mismatches += 1
+                            recovered = True
+                            best_i = curr_i
+                            best_j = curr_j
+                            
+                    if not recovered:
+                        break
+                        
+            match_len_i = best_i - i
+            match_len_j = best_j - j
+            match_len = max(match_len_i, match_len_j)
+            
+            if match_len < 2:
+                continue
+                
+            gap = max(0, j - best_i)
+            content_count = sum(1 for k in range(match_len_i) if not flow[i+k]['is_stop'])
+            has_long_word = any(len(flow[i+k]['clean']) >= 4 and not flow[i+k]['is_stop'] for k in range(match_len_i))
+            
+            is_retake = False
+            
+            if match_len == 2:
+                # 2 words: Must be very close to be considered a retake
+                if gap <= 2:
+                    is_retake = True
+                elif gap <= 4 and content_count >= 2 and has_long_word:
+                    is_retake = True
+            elif match_len == 3:
+                if gap <= 4:
+                    is_retake = True
+                elif gap <= 8 and content_count >= 1:
+                    is_retake = True
+            elif match_len == 4:
+                if gap <= 6:
+                    is_retake = True
+                elif gap <= 10 and content_count >= 1:
+                    is_retake = True
+            elif match_len >= 5:
+                if gap <= 10:
+                    is_retake = True
+                elif content_count >= 2:
+                    is_retake = True
+                    
+            if is_retake:
+                for k in range(match_len_i):
+                    marked_indices.add(i + k)
+                for k in range(match_len_j):
+                    marked_indices.add(j + k)
+
+    # 3. Apply markings
+    count = 0
+    for fi in marked_indices:
+        real_idx = flow[fi]['real_idx']
+        w = words_data[real_idx]
+        if w.get('manual_status') and w['manual_status'] != 'repeat':
+            continue
+        w['status'] = 'repeat'
+        w['selected'] = False
+        w['is_auto'] = True
+        w['algo_status'] = 'repeat'
+        count += 1
+
+    log_info(f"[Standalone v4.1] Marked {count} words as human errors/repeats.")
     return words_data, count
 
 # ==========================================
