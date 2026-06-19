@@ -1677,7 +1677,14 @@ class TranscriptionCanvas(QWidget):
             return
             
         # Clean up leftover artifacts from previous layout passes
-        for w in self.words_data:
+        words_to_clean = []
+        if hasattr(self, 'words_data') and self.words_data:
+            words_to_clean.extend(self.words_data)
+        if hasattr(self, '_cached_visible_words') and self._cached_visible_words:
+            # We don't use set() since dicts are unhashable, just iterate all.
+            words_to_clean.extend(self._cached_visible_words)
+            
+        for w in words_to_clean:
             w.pop('_ts_rect', None)
             w.pop('_ts_text', None)
             w.pop('_separator_y', None)
@@ -1728,6 +1735,10 @@ class TranscriptionCanvas(QWidget):
             while len(self.sbs_editors) < len(self.sbs_rows):
                 ed = SBSTextEdit(self)
                 ed.setFrameShape(QFrame.NoFrame)
+                ed.setStyleSheet(f"background: {config.BG_COLOR}; color: {config.FG_COLOR}; border: none; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
+                text_opt = QTextOption()
+                text_opt.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+                ed.document().setDefaultTextOption(text_opt)
                 ed.textChanged.connect(self._on_sbs_editor_changed)
                 self.sbs_editors.append(ed)
                 
@@ -1748,7 +1759,8 @@ class TranscriptionCanvas(QWidget):
                 ed = self.sbs_editors[idx]
                 
                 new_text = row.get("script_text", "")
-                if getattr(ed, '_last_text', None) != new_text:
+                text_changed = getattr(ed, '_last_text', None) != new_text
+                if text_changed:
                     ed.blockSignals(True)
                     ed.setPlainText(new_text)
                     ed.blockSignals(False)
@@ -1849,20 +1861,6 @@ class TranscriptionCanvas(QWidget):
                 # Transcript content height
                 transcript_h = (y + line_height) - row_start_y
                 
-                # Dynamic height for script editor
-                # Only recompute text width if width actually changed (very expensive operation on QTextDocument)
-                if getattr(ed, '_last_width', -1) != script_w:
-                    ed.document().setTextWidth(max(1, script_w))
-                    ed._last_width = script_w
-                script_doc_h = ed.document().size().height() + 10
-                
-                # Use whichever is taller
-                row_h = max(transcript_h, script_doc_h, line_height)
-                
-                ed.setGeometry(script_start_x, row_start_y, max(1, script_w), row_h)
-                ed.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-                ed.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-                
                 script_kind = row.get("script_kind")
                 if getattr(ed, '_last_kind', None) != script_kind:
                     text_opt = QTextOption()
@@ -1885,7 +1883,21 @@ class TranscriptionCanvas(QWidget):
                         ed.document().setDefaultTextOption(text_opt)
                         ed.setAlignment(Qt.AlignLeft)
                     ed._last_kind = script_kind
-                    
+                
+                # Dynamic height for script editor
+                # Force recompute if width or text changed
+                if getattr(ed, '_last_width', -1) != script_w or text_changed:
+                    ed.document().setTextWidth(max(1, script_w))
+                    ed._last_width = script_w
+                script_doc_h = ed.document().size().height() + 10
+                
+                # Use whichever is taller
+                row_h = max(transcript_h, script_doc_h, line_height)
+                
+                ed.setGeometry(script_start_x, row_start_y, max(1, script_w), row_h)
+                ed.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                ed.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                
                 ed.show()
                 y = row_start_y + row_h
 
@@ -8247,6 +8259,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self.btn_side_by_side_compare = QPushButton(self.txt("btn_side_by_side_compare"))
         self.btn_side_by_side_compare.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_side_by_side_compare.setFixedHeight(32)
+        self.btn_side_by_side_compare.setEnabled(False)
         self.btn_side_by_side_compare.setStyleSheet(
             "QPushButton { background-color: #2d3f35; color: #d9d9d9; "
             "font-weight: bold; border: 1px solid #3d5f4b; border-radius: 4px; padding: 7px; } "
@@ -8257,7 +8270,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         
         self.btn_exit_sbs_text = QPushButton(self.txt("btn_return_normal"))
         self.btn_exit_sbs_text.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_exit_sbs_text.setStyleSheet("QPushButton { background: transparent; color: #808080; text-decoration: underline; border: none; padding: 10px; font-size: 11pt; } QPushButton:hover { color: #ffffff; }")
+        self.btn_exit_sbs_text.setStyleSheet("QPushButton { background: transparent; color: #888888; border: none; padding: 10px; font-size: 11pt; } QPushButton:hover { color: #ffffff; }")
         self.btn_exit_sbs_text.clicked.connect(self._exit_side_by_side)
         self.btn_exit_sbs_text.hide()
         l_script_analysis.addWidget(self.btn_exit_sbs_text)
@@ -8268,6 +8281,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         def update_btn_style(color):
             style = f"QPushButton {{ background-color: {color.name()}; border: 1px solid #111; border-radius: 4px; color: #fff; font-weight: bold; padding: 8px; }}"
             self.btn_analyze_compare.setStyleSheet(style)
+            
         self._analyze_color_anim.valueChanged.connect(update_btn_style)
         
         self.activities["script_analysis"] = _wrap_activity(p_script_analysis)
@@ -8743,58 +8757,50 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self._sbs_left_sizes = self._main_h_splitter.sizes()
         self._panel_left.hide()
 
+        self.editor_view_stack.setCurrentIndex(1)
+        if hasattr(self, 'sbs_loading_bar'):
+            self.sbs_loading_bar.set_value(-1)
+
+        def _finish_sbs(rows, updated_words):
+            self.text_canvas.words_data = updated_words
+            self._sbs_last_script = script_text
+            self._sbs_cached_rows = rows
+            
+            self.text_canvas.is_sbs_mode = True
+            self.text_canvas.sbs_rows = rows
+            self.text_canvas._calculate_layout()
+            self.text_canvas.update()
+            
+            self._sbs_thread = None
+            QTimer.singleShot(150, lambda: self.editor_view_stack.setCurrentIndex(0))
+
         if getattr(self, '_sbs_last_script', None) == script_text and getattr(self, '_sbs_cached_rows', None) is not None:
             self.text_canvas.is_sbs_mode = True
             self.text_canvas.sbs_rows = self._sbs_cached_rows
             self.text_canvas._calculate_layout()
             self.text_canvas.update()
-            self._show_transcript_view()
-            return
+            QTimer.singleShot(150, lambda: self.editor_view_stack.setCurrentIndex(0))
+        else:
+            from PySide6.QtCore import QThread, Signal as _Signal
+            
+            class _SBSThread(QThread):
+                finished_ok = _Signal(list, list)
+                
+                def __init__(self, engine, script_text, current_words):
+                    super().__init__()
+                    self.engine = engine
+                    self.script_text = script_text
+                    self.current_words = current_words
+                    
+                def run(self):
+                    import algorithms
+                    updated_words = self.engine.run_comparison_analysis(self.script_text, self.current_words)
+                    rows = algorithms.build_side_by_side_alignment(self.script_text, updated_words)
+                    self.finished_ok.emit(rows, updated_words)
 
-        # Delayed processing with loading overlay in case it takes long
-        self._sbs_loading_shown = False
-        self._sbs_loading_timer = QTimer(self)
-        self._sbs_loading_timer.setSingleShot(True)
-        self._sbs_loading_timer.timeout.connect(self._show_sbs_loading)
-        self._sbs_loading_timer.start(200)
-
-        QTimer.singleShot(50, lambda: self._process_side_by_side(script_text))
-
-    def _show_sbs_loading(self):
-        if not hasattr(self, 'sbs_loading_overlay'):
-            self.sbs_loading_overlay = QFrame(self.editor_view_stack)
-            self.sbs_loading_overlay.setStyleSheet("background-color: rgba(0, 0, 0, 40);")
-            ol_layout = QVBoxLayout(self.sbs_loading_overlay)
-            lbl = QLabel(self.txt("lbl_generating_view"))
-            lbl.setStyleSheet("color: white; font-size: 16pt; font-weight: bold; background: transparent;")
-            lbl.setAlignment(Qt.AlignCenter)
-            ol_layout.addWidget(lbl)
-        self.sbs_loading_overlay.setGeometry(self.editor_view_stack.rect())
-        self.sbs_loading_overlay.show()
-        self.sbs_loading_overlay.raise_()
-        self._sbs_loading_shown = True
-
-    def _process_side_by_side(self, script_text):
-        import algorithms
-        updated_words = self.engine.run_comparison_analysis(script_text, self.text_canvas.words_data)
-        self.text_canvas.words_data = updated_words
-
-        rows = algorithms.build_side_by_side_alignment(script_text, updated_words)
-        self._sbs_last_script = script_text
-        self._sbs_cached_rows = rows
-        
-        self.text_canvas.is_sbs_mode = True
-        self.text_canvas.sbs_rows = rows
-        self.text_canvas._calculate_layout()
-        self.text_canvas.update()
-        
-        self._show_transcript_view()
-
-        # Hide loading overlay
-        if hasattr(self, '_sbs_loading_timer'):
-            self._sbs_loading_timer.stop()
-        if hasattr(self, 'sbs_loading_overlay'):
-            self.sbs_loading_overlay.hide()
+            self._sbs_thread = _SBSThread(self.engine, script_text, self.text_canvas.words_data)
+            self._sbs_thread.finished_ok.connect(_finish_sbs)
+            self._sbs_thread.start()
 
     def _exit_side_by_side(self):
         self._is_sbs_active = False
@@ -9650,7 +9656,10 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self._assembly_thread = _AssemblyThread(self.engine, export_data, prefs, _sigs)
         self._assembly_sigs   = _sigs   # keep alive until finished signal fires
         self._assembly_prefs  = prefs
-        self._assembly_thread.start()
+        
+        # Delay thread start to ensure loading UI transition finishes before GIL is locked
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(150, lambda: self._assembly_thread.start())
 
     def _on_assemble_done(self, result):
         """Called on main thread when assembly QThread finishes."""
@@ -9697,7 +9706,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
 
     def _on_assembly_success(self, new_tl_name, clean_ops):
         if hasattr(self, 'go_to_page'): self.go_to_page(2)
-        if hasattr(self, '_panel_left'): self._panel_left.show()
+        
+        is_sbs = getattr(self.text_canvas, 'is_sbs_mode', False)
+        if hasattr(self, '_panel_left') and not is_sbs: self._panel_left.show()
         if hasattr(self, '_panel_right'): self._panel_right.show()
         
         # --- CHAPTER REGISTRATION ---
@@ -9727,7 +9738,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
 
     def _on_assembly_error(self, err_msg):
         if hasattr(self, 'go_to_page'): self.go_to_page(2)
-        if hasattr(self, '_panel_left'): self._panel_left.show()
+        
+        is_sbs = getattr(self.text_canvas, 'is_sbs_mode', False)
+        if hasattr(self, '_panel_left') and not is_sbs: self._panel_left.show()
         if hasattr(self, '_panel_right'): self._panel_right.show()
         dlg = CustomMsgBox(self, self.txt("lbl_error"), err_msg, self.txt("btn_ok"))
         dlg.exec()
@@ -10299,9 +10312,26 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         normal_editor_layout.setSpacing(0)
         normal_editor_layout.addWidget(self.scroll_area)
 
+        self.sbs_loading_page = QWidget()
+        self.sbs_loading_page.setStyleSheet(f"background-color: {config.BG_COLOR};")
+        ol_layout = QVBoxLayout(self.sbs_loading_page)
+        ol_layout.setAlignment(Qt.AlignCenter)
+        
+        lbl = QLabel(self.txt("lbl_just_a_second"))
+        lbl.setStyleSheet(f"color: {config.NOTE_COL}; font-size: 13pt; font-family: '{config.UI_FONT_NAME}'; background: transparent;")
+        lbl.setAlignment(Qt.AlignCenter)
+        ol_layout.addWidget(lbl)
+        
+        ol_layout.addSpacing(15)
+        
+        self.sbs_loading_bar = LiquidProgressBar(self.sbs_loading_page)
+        self.sbs_loading_bar.setFixedWidth(400)
+        ol_layout.addWidget(self.sbs_loading_bar, 0, Qt.AlignCenter)
+
         self.editor_view_stack = QStackedWidget(page)
         self.editor_view_stack.setStyleSheet("background: transparent;")
         self.editor_view_stack.addWidget(normal_editor_page)
+        self.editor_view_stack.addWidget(self.sbs_loading_page)
         layout.addWidget(self.editor_view_stack)
         
         return page
