@@ -3980,6 +3980,7 @@ class CustomDropdown(QPushButton):
     def __init__(self, options_list, parent=None):
         super().__init__(parent=parent)
         self.options_list = list(options_list)
+        self.max_visible_items = 5
         self.setText(self.txt("txt_select"))
         self.setCursor(Qt.PointingHandCursor)
         self.setStyleSheet(f"""
@@ -4048,7 +4049,7 @@ class CustomDropdown(QPushButton):
         
         def _update_height():
             row_h = 26
-            display_count = min(5, list_widget.count())
+            display_count = min(self.max_visible_items, list_widget.count())
             list_height = display_count * row_h
             list_widget.setFixedHeight(list_height)
             
@@ -6368,6 +6369,8 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         l_sync = QHBoxLayout(w_sync)
         l_sync.setContentsMargins(0, 0, 0, 0)
         l_sync.addStretch()
+        l_sync.addWidget(self.parent()._create_info_icon("tt_sync_davinci_chapter"))
+        l_sync.addSpacing(6)
         l_sync.addWidget(self.chk_sync_davinci)
         _add_row(form_bottom, self.txt("chk_sync_davinci"), w_sync,
                  True, lambda v: self.chk_sync_davinci.setChecked(v, animated=False))
@@ -6381,7 +6384,6 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
                                 _cfg_bot.DEFAULT_SETTINGS["xml_preserve_track_order"])),
             animated=False
         )
-        self.tgl_xml_preserve_track_order.setToolTip(self.txt("tt_xml_preserve_track_order"))
         self.tgl_xml_preserve_track_order.toggled.connect(
             lambda checked: self.engine.save_preferences({"xml_preserve_track_order": checked})
         )
@@ -6389,6 +6391,8 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         l_xml_track = QHBoxLayout(w_xml_track)
         l_xml_track.setContentsMargins(0, 0, 0, 0)
         l_xml_track.addStretch()
+        l_xml_track.addWidget(self.parent()._create_info_icon("tt_xml_preserve_track_order"))
+        l_xml_track.addSpacing(6)
         l_xml_track.addWidget(self.tgl_xml_preserve_track_order)
         _add_row(form_bottom, self.txt("lbl_xml_preserve_track_order"), w_xml_track,
                  False, lambda v: self.tgl_xml_preserve_track_order.setChecked(v, animated=False))
@@ -6399,11 +6403,12 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             bool(prefs.get('timestamp_precise', config.DEFAULT_SETTINGS['timestamp_precise'])),
             animated=False
         )
-        self.tgl_timestamp_precise.setToolTip(self.txt("tt_timestamp_precise"))
         w_ts_precise = QWidget()
         l_ts_precise = QHBoxLayout(w_ts_precise)
         l_ts_precise.setContentsMargins(0, 0, 0, 0)
         l_ts_precise.addStretch()
+        l_ts_precise.addWidget(self.parent()._create_info_icon("tt_timestamp_precise"))
+        l_ts_precise.addSpacing(6)
         l_ts_precise.addWidget(self.tgl_timestamp_precise)
         _add_row(form_bottom, self.txt("lbl_timestamp_precise"), w_ts_precise,
                  False, lambda v: self.tgl_timestamp_precise.setChecked(v, animated=False))
@@ -8247,6 +8252,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         lbl_cut.setWordWrap(True)
         row_silence_cut.addWidget(lbl_cut)
         row_silence_cut.addStretch()
+        info_silence_cut = self._create_info_icon("tt_detect_and_cut_silence")
+        row_silence_cut.addWidget(info_silence_cut)
+        row_silence_cut.addSpacing(6)
         self.tgl_silence_cut = ToggleSwitch()
         row_silence_cut.addWidget(self.tgl_silence_cut)
         l_silence.addLayout(row_silence_cut)
@@ -8256,6 +8264,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         lbl_mark.setWordWrap(True)
         row_silence_mark.addWidget(lbl_mark)
         row_silence_mark.addStretch()
+        info_silence_mark = self._create_info_icon("tt_detect_and_mark_silence")
+        row_silence_mark.addWidget(info_silence_mark)
+        row_silence_mark.addSpacing(6)
         self.tgl_silence_mark = ToggleSwitch()
         row_silence_mark.addWidget(self.tgl_silence_mark)
         l_silence.addLayout(row_silence_mark)
@@ -8314,6 +8325,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         row_auto_filler = QHBoxLayout()
         row_auto_filler.addWidget(QLabel(self.txt("lbl_mark_filler_words_automat")))
         row_auto_filler.addStretch()
+        info_auto_filler = self._create_info_icon("tt_mark_filler_words")
+        row_auto_filler.addWidget(info_auto_filler)
+        row_auto_filler.addSpacing(6)
         self.tgl_auto_filler = ToggleSwitch()
         self.tgl_auto_filler.setChecked(True)
         row_auto_filler.addWidget(self.tgl_auto_filler)
@@ -9673,18 +9687,60 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
 
         # ── Model
         model_items = [
-            "Tiny (I wouldn't, <1 GB)",
-            "Base (Dogsh!t, ~1 GB)",
-            "Small (Bearable, ~2 GB)",
-            "Medium (Okayish, ~5 GB)",
-            "Large Turbo (Best Balance, ~6 GB)",
-            "Large (Recommended, ~10 GB)",
+            "Tiny (I wouldn't, ~0.3GB)",
+            "Base (Dogsh!t, ~0.5GB)",
+            "Small (Bearable, ~1.0GB)",
+            "Medium (Okayish, ~2.5GB)",
+            "Large Turbo (Best Balance, ~2.5GB)",
+            "Large (Recommended, ~3.5GB)",
         ]
         self._combo_model = CustomDropdown(model_items)
+        self._combo_model.max_visible_items = 6
         self._combo_model.setFixedHeight(30)
         self._combo_model.setText(prefs["model"] if "model" in prefs and prefs["model"] in model_items else model_items[4])
         self._combo_model.valueChanged.connect(lambda v: self.engine.save_preferences({"model": v}))
-        l_trans.addLayout(_row(self.txt("lbl_model"), self._combo_model))
+        
+        info_model = QLabel()
+        _src_dir = os.path.dirname(os.path.abspath(__file__))
+        _prod_assets_dir = os.path.join(_src_dir, "layout")
+        _dev_assets_dir = os.path.join(os.path.dirname(_src_dir), "assets", "layout")
+        _assets_dir = _prod_assets_dir if os.path.exists(_prod_assets_dir) else _dev_assets_dir
+        info_icon_path = os.path.join(_assets_dir, "information.png")
+        if os.path.exists(info_icon_path):
+            info_model.setPixmap(QPixmap(info_icon_path).scaled(18, 18, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        else:
+            info_model.setText("🛈")
+            info_model.setStyleSheet("color: #888888; font-size: 11pt;")
+            
+        info_model.custom_tooltip_text = f"<div style='max-width: 320px; white-space: pre-wrap;'>{self.txt('tt_model_size_info')}</div>"
+        info_model.setCursor(Qt.WhatsThisCursor)
+        
+        def instant_tooltip_model(event):
+            if hasattr(self, 'shared_tooltip'):
+                self.shared_tooltip.show_global(info_model.custom_tooltip_text, QCursor.pos())
+        info_model.enterEvent = instant_tooltip_model
+        info_model.leaveEvent = lambda e: self.shared_tooltip.hide() if hasattr(self, 'shared_tooltip') else None
+        info_model.installEventFilter(self)
+        
+        row_model_lbl = QHBoxLayout()
+        row_model_lbl.setContentsMargins(0, 0, 0, 0)
+        row_model_lbl.setSpacing(5)
+        lbl_model = QLabel(self.txt("lbl_model"))
+        lbl_model.setStyleSheet(
+            f"color: {config.NOTE_COL}; font-size: 9pt;"
+            f" font-family: '{config.UI_FONT_NAME}'; background: transparent;"
+        )
+        row_model_lbl.addWidget(lbl_model)
+        row_model_lbl.addWidget(info_model)
+        row_model_lbl.addStretch()
+        
+        vbox_model = QVBoxLayout()
+        vbox_model.setContentsMargins(0, 0, 0, 0)
+        vbox_model.setSpacing(3)
+        vbox_model.addLayout(row_model_lbl)
+        vbox_model.addWidget(self._combo_model)
+        
+        l_trans.addLayout(vbox_model)
         l_trans.addSpacing(15)
 
         # ── Ultra Precise Mode
@@ -9913,6 +9969,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         lbl_fs_cut.setStyleSheet(f"color: {config.FG_COLOR}; font-family: '{config.UI_FONT_NAME}'; font-size: 10pt; background: transparent;")
         row_fs_cut.addWidget(lbl_fs_cut)
         row_fs_cut.addStretch()
+        info_fs_cut = self._create_info_icon("tt_cut_silence_directly")
+        row_fs_cut.addWidget(info_fs_cut)
+        row_fs_cut.addSpacing(6)
         self.tgl_fs_cut = ToggleSwitch()
         self.tgl_fs_cut.setChecked(prefs.get('fs_cut_mode', True), animated=False)
         row_fs_cut.addWidget(self.tgl_fs_cut)
@@ -9924,6 +9983,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         lbl_fs_mark.setStyleSheet(f"color: {config.FG_COLOR}; font-family: '{config.UI_FONT_NAME}'; font-size: 10pt; background: transparent;")
         row_fs_mark.addWidget(lbl_fs_mark)
         row_fs_mark.addStretch()
+        info_fs_mark = self._create_info_icon("tt_mark_silence_with_color")
+        row_fs_mark.addWidget(info_fs_mark)
+        row_fs_mark.addSpacing(6)
         self.tgl_fs_mark = ToggleSwitch()
         self.tgl_fs_mark.setChecked(prefs.get('fs_mark_mode', False), animated=False)
         row_fs_mark.addWidget(self.tgl_fs_mark)
@@ -10070,6 +10132,30 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         if hasattr(self, 'editor_view_stack'):
             self.editor_view_stack.setCurrentIndex(0)
 
+    def _create_info_icon(self, tooltip_key: str) -> QLabel:
+        info = QLabel()
+        _src_dir = os.path.dirname(os.path.abspath(__file__))
+        _prod_assets_dir = os.path.join(_src_dir, "layout")
+        _dev_assets_dir = os.path.join(os.path.dirname(_src_dir), "assets", "layout")
+        _assets_dir = _prod_assets_dir if os.path.exists(_prod_assets_dir) else _dev_assets_dir
+        info_icon_path = os.path.join(_assets_dir, "information.png")
+        if os.path.exists(info_icon_path):
+            info.setPixmap(QPixmap(info_icon_path).scaled(18, 18, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        else:
+            info.setText("🛈")
+            info.setStyleSheet("color: #888888; font-size: 11pt;")
+            
+        tt_text = self.txt(tooltip_key) if hasattr(self, 'txt') else tooltip_key
+        info.custom_tooltip_text = f"<div style='max-width: 300px; white-space: pre-wrap;'>{tt_text}</div>"
+        info.setCursor(Qt.WhatsThisCursor)
+        
+        def instant_tooltip(event):
+            if hasattr(self, 'shared_tooltip'):
+                self.shared_tooltip.show_global(info.custom_tooltip_text, QCursor.pos())
+        info.enterEvent = instant_tooltip
+        info.leaveEvent = lambda e: self.shared_tooltip.hide() if hasattr(self, 'shared_tooltip') else None
+        return info
+
     def _show_start_noise(self, link):
         self.show_hidden_start = True
         self.lbl_skipped_noise.hide()
@@ -10081,7 +10167,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         import copy
         self._chapters = [{
             "name": "Original",
-            "tl_name": getattr(self, '_original_timeline_name', ""),
+            "tl_name": self._transcription_source.get("timeline_name", "") if getattr(self, '_transcription_source', None) else "",
             "words": copy.deepcopy(words_data)
         }]
         self._current_chapter_idx = 0
