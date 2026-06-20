@@ -691,6 +691,28 @@ class MarqueeItemDelegate(QStyledItemDelegate):
         hint = super().sizeHint(option, index)
         return hint
 
+class WrappingPlaceholderTextEdit(QTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._custom_placeholder = ""
+
+    def setPlaceholderText(self, text):
+        self._custom_placeholder = text
+        self.viewport().update()
+
+    def placeholderText(self):
+        return self._custom_placeholder
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self.toPlainText() and self._custom_placeholder:
+            p = QPainter(self.viewport())
+            p.setPen(QColor("#777777"))
+            rect = self.viewport().rect().adjusted(5, 5, -5, -5)
+            p.drawText(rect, Qt.AlignTop | Qt.TextWordWrap, self._custom_placeholder)
+            p.end()
+
+
 class ToggleSwitch(QWidget):
     """
     iOS-style animated toggle switch inheriting from QWidget.
@@ -5709,7 +5731,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         # ── Revert helper ─────────────────────────────────────────────────
         self.revert_funcs = []
 
-        def _add_row(form, label_text, widget, default_val, setter_func, info_key=None):
+        def _add_row(form, label_text, widget, default_val, setter_func):
             container = QWidget()
             row = QHBoxLayout(container)
             row.setContentsMargins(0, 0, 0, 0)
@@ -5727,23 +5749,8 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             row.addWidget(btn_rev)
             lbl = QLabel(label_text)
             lbl.setWordWrap(True)
-            
-            if info_key:
-                lbl_container = QWidget()
-                lbl_container.setMinimumWidth(200)
-                lbl_layout = QHBoxLayout(lbl_container)
-                lbl_layout.setContentsMargins(0, 0, 0, 0)
-                lbl_layout.setSpacing(6)
-                lbl_layout.addWidget(lbl)
-                info_icon = self.parent()._create_info_icon(info_key)
-                info_icon.setStyleSheet("color: #888; font-weight: bold; background: transparent; padding: 2px;")
-                lbl_layout.addWidget(info_icon)
-                lbl_layout.addStretch()
-                form.addRow(lbl_container, container)
-            else:
-                lbl.setMinimumWidth(200)
-                form.addRow(lbl, container)
-                
+            lbl.setMinimumWidth(200)
+            form.addRow(lbl, container)
             self.revert_funcs.append(lambda d=default_val, s=setter_func: s(d))
             return lbl, container
 
@@ -6621,22 +6628,25 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             l_ai.addWidget(lbl_prompt)
             l_ai.addSpacing(4)
 
-            self.textedit_prompt = QTextEdit()
+            self.textedit_prompt = WrappingPlaceholderTextEdit()
             self.textedit_prompt.setMaximumHeight(80)
-            self.textedit_prompt.setPlaceholderText("e.g. Transcribe film dialogue with punctuation.")
             saved_prompt = prefs.get('ai_initial_prompt', '').strip()
+            
+            # Resolve ISO code from display name in prefs
+            current_lang_display = prefs.get('lang', 'Auto')
+            current_lang_iso = "Auto"
+            for iso, display in config.SUPPORTED_LANGUAGES.items():
+                if display == current_lang_display:
+                    current_lang_iso = iso
+                    break
+            
+            auto_prompt = config.get_whisper_prompt_for_lang(current_lang_iso)
+            self.textedit_prompt.setPlaceholderText(auto_prompt)
+            
             if saved_prompt:
-                display_prompt = saved_prompt
+                self.textedit_prompt.setPlainText(saved_prompt)
             else:
-                # Resolve ISO code from display name in prefs
-                current_lang_display = prefs.get('lang', 'Auto')
-                current_lang_iso = "Auto"
-                for iso, display in config.SUPPORTED_LANGUAGES.items():
-                    if display == current_lang_display:
-                        current_lang_iso = iso
-                        break
-                display_prompt = config.get_whisper_prompt_for_lang(current_lang_iso)
-            self.textedit_prompt.setPlainText(display_prompt)
+                self.textedit_prompt.setPlainText("")
             self.textedit_prompt.setStyleSheet(f"""
                 QTextEdit {{
                     background-color: #1e1e1e;
@@ -6696,8 +6706,8 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self.spin_no_speech.setRange(0.0, 1.0)
             self.spin_no_speech.setSingleStep(0.1)
             self.spin_no_speech.setDecimals(2)
-            self.spin_no_speech.setValue(float(prefs.get('ai_no_speech_threshold', 0.2)))
-            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_no_speech"), self.spin_no_speech, 0.2, self.spin_no_speech.setValue))
+            self.spin_no_speech.setValue(float(prefs.get('ai_no_speech_threshold', 0.6)))
+            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_no_speech"), self.spin_no_speech, 0.6, self.spin_no_speech.setValue))
 
             self.spin_patience = QDoubleSpinBox()
             self.spin_patience.setRange(0.0, 10.0)
@@ -6710,8 +6720,8 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self.spin_compression.setRange(0.0, 100.0)
             self.spin_compression.setSingleStep(0.1)
             self.spin_compression.setDecimals(2)
-            self.spin_compression.setValue(float(prefs.get('ai_compression_ratio_threshold', 10.0)))
-            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_compression_ratio"), self.spin_compression, 10.0, self.spin_compression.setValue))
+            self.spin_compression.setValue(float(prefs.get('ai_compression_ratio_threshold', 2.4)))
+            self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_compression_ratio"), self.spin_compression, 2.4, self.spin_compression.setValue))
 
             self.spin_no_repeat = QSpinBox()
             self.spin_no_repeat.setRange(0, 100)
@@ -6787,9 +6797,9 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self.spin_snap.setSingleStep(0.1)
             self.spin_snap.setValue(float(prefs.get('snap_max', prefs.get('snap_margin', self.DEFAULTS['snap_max']))))
 
-            _add_row(form_sync, self.txt("lbl_offset_s"),   self.spin_offset, self.DEFAULTS['offset'],   self.spin_offset.setValue, info_key="tt_audio_sync_offset")
-            _add_row(form_sync, self.txt("lbl_padding_s"),  self.spin_pad,    self.DEFAULTS['pad'],       self.spin_pad.setValue, info_key="tt_audio_sync_pad")
-            _add_row(form_sync, self.txt("lbl_snap_max_s"), self.spin_snap,   self.DEFAULTS['snap_max'],  self.spin_snap.setValue, info_key="tt_audio_sync_snap")
+            _add_row(form_sync, self.txt("lbl_offset_s"),   self.spin_offset, self.DEFAULTS['offset'],   self.spin_offset.setValue)
+            _add_row(form_sync, self.txt("lbl_padding_s"),  self.spin_pad,    self.DEFAULTS['pad'],       self.spin_pad.setValue)
+            _add_row(form_sync, self.txt("lbl_snap_max_s"), self.spin_snap,   self.DEFAULTS['snap_max'],  self.spin_snap.setValue)
 
             l_sync.addLayout(form_sync)
             l_sync.addStretch()
@@ -7378,15 +7388,11 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         }
         
         if not is_basic:
-            prompt_text = self._safe_get('textedit_prompt', old_prefs.get('ai_initial_prompt', ''), 'toPlainText')
-            if prompt_text in config.WHISPER_PROMPTS.values() or prompt_text == config.GOLDEN_INITIAL_PROMPT:
-                prompt_text = ""
-            
             state.update({
                 'always_on_top':      self._safe_get('chk_ontop', old_prefs.get('always_on_top', False), 'isChecked'),
                 'device':             self._safe_get('dropdown_device', old_prefs.get('device', 'auto').capitalize(), 'currentText').lower(),
                 'ai_compute_type':    self._safe_get('dropdown_compute', old_prefs.get('ai_compute_type', 'Auto'), 'currentText'),
-                'ai_initial_prompt':  prompt_text,
+                'ai_initial_prompt':  self._safe_get('textedit_prompt', old_prefs.get('ai_initial_prompt', ''), 'toPlainText'),
                 'chunk_max_words':    self._safe_get('spin_chunk_max', old_prefs.get('chunk_max_words', 30), 'value'),
                 'chunk_lookahead':    self._safe_get('spin_chunk_look', old_prefs.get('chunk_lookahead', 3), 'value'),
                 'chunk_min_chars':    self._safe_get('spin_chunk_min', old_prefs.get('chunk_min_chars', 7), 'value'),
@@ -7399,9 +7405,9 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
                 'ai_temperature':           self._safe_get('spin_temperature', old_prefs.get('ai_temperature', 0.0), 'value'),
                 'ai_condition_on_prev':     self._safe_get('chk_condition_prev', old_prefs.get('ai_condition_on_prev', False), 'isChecked'),
                 'ai_logprob_threshold':     self._safe_get('spin_logprob', old_prefs.get('ai_logprob_threshold', -1.0), 'value'),
-                'ai_no_speech_threshold':   self._safe_get('spin_no_speech', old_prefs.get('ai_no_speech_threshold', 0.2), 'value'),
+                'ai_no_speech_threshold':   self._safe_get('spin_no_speech', old_prefs.get('ai_no_speech_threshold', 0.6), 'value'),
                 'ai_patience':              self._safe_get('spin_patience', old_prefs.get('ai_patience', 1.0), 'value'),
-                'ai_compression_ratio_threshold': self._safe_get('spin_compression', old_prefs.get('ai_compression_ratio_threshold', 10.0), 'value'),
+                'ai_compression_ratio_threshold': self._safe_get('spin_compression', old_prefs.get('ai_compression_ratio_threshold', 2.4), 'value'),
                 'ai_no_repeat_ngram_size':  self._safe_get('spin_no_repeat', old_prefs.get('ai_no_repeat_ngram_size', 0), 'value'),
                 'ai_regroup':               self._safe_get('chk_regroup', old_prefs.get('ai_regroup', False), 'isChecked'),
                 'ai_suppress_silence':      self._safe_get('chk_suppress_silence', old_prefs.get('ai_suppress_silence', False), 'isChecked'),
@@ -7492,9 +7498,9 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self._safe_set('spin_temperature', state.get('ai_temperature', 0.0), 'setValue')
             self._safe_set('chk_condition_prev', state.get('ai_condition_on_prev', False), 'setChecked')
             self._safe_set('spin_logprob', state.get('ai_logprob_threshold', -1.0), 'setValue')
-            self._safe_set('spin_no_speech', state.get('ai_no_speech_threshold', 0.2), 'setValue')
+            self._safe_set('spin_no_speech', state.get('ai_no_speech_threshold', 0.6), 'setValue')
             self._safe_set('spin_patience', state.get('ai_patience', 1.0), 'setValue')
-            self._safe_set('spin_compression', state.get('ai_compression_ratio_threshold', 10.0), 'setValue')
+            self._safe_set('spin_compression', state.get('ai_compression_ratio_threshold', 2.4), 'setValue')
             self._safe_set('spin_no_repeat', state.get('ai_no_repeat_ngram_size', 0), 'setValue')
             self._safe_set('chk_regroup', state.get('ai_regroup', False), 'setChecked')
             self._safe_set('chk_suppress_silence', state.get('ai_suppress_silence', False), 'setChecked')

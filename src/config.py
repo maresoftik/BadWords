@@ -65,8 +65,9 @@ DEFAULT_WHISPER_PROMPT = "yyy, eee, uuu, yhm, yyyy, eeee, aaaa, mhm, aha, umm, u
 # as-is instead of being smoothed into grammatical sentences.
 # Used as the default for ai_initial_prompt.
 GOLDEN_INITIAL_PROMPT = (
-    "Umm, yyy, eh, mmm, tsk, h-h-hello, i... i will check. "
-    "I went... I went to the st... store, tak tak."
+    "Mmm, uh... t-t-ta, ta, ta... "
+    "na na... na na... o... ok, ok, ok. "
+    "Da, da... d-d-da... mhm, mhm."
 )
 
 # ==========================================
@@ -80,205 +81,205 @@ GOLDEN_INITIAL_PROMPT = (
 # Key: Whisper ISO language code. "Auto" → falls back to GOLDEN_INITIAL_PROMPT.
 WHISPER_PROMPTS = {
     # Afrikaans — generated native fillers
-    "af": "uh, uhm... uh, uhm, h-h-hello, i... i will check. I went... I went to the st... store, uh.",
+    "af": "uh, uhm... uh-uh-uh, uh, uh... uhm uhm... uhm uhm... uh... uh, uh, uh... mhm.",
     # Amharic — generated native fillers
-    "am": "እህ, እም... እህ, እም, h-h-hello, i... i will check. I went... I went to the st... store, እህ.",
+    "am": "እህ, እም... እህ-እህ-እህ, እህ, እህ... እም እም... እም እም... እህ... እህ, እህ, እህ... mhm.",
     # Arabic
-    "ar": "يعني، آه، إيه... إيه، صح، h-h-hello, i... i will check. I went... I went to the st... store, يعني.",
+    "ar": "يعني،, آه،... يعني،-يعني،-يعني،, يعني،, يعني،... آه، آه،... آه، آه،... يعني،... يعني،, يعني،, يعني،... mhm.",
     # Assamese — generated native fillers
-    "as": "উম, এহ... উম, এহ, h-h-hello, i... i will check. I went... I went to the st... store, উম.",
+    "as": "উম, এহ... উম-উম-উম, উম, উম... এহ এহ... এহ এহ... উম... উম, উম, উম... mhm.",
     # Azerbaijani — generated native fillers
-    "az": "ıı, eee... ıı, eee, h-h-hello, i... i will check. I went... I went to the st... store, ıı.",
+    "az": "ıı, eee... ıı-ıı-ıı, ıı, ıı... eee eee... eee eee... ıı... ıı, ıı, ıı... mhm.",
     # Bashkir — generated native fillers
-    "ba": "эээ, ммм... эээ, ммм, h-h-hello, i... i will check. I went... I went to the st... store, эээ.",
+    "ba": "эээ, ммм... эээ-эээ-эээ, эээ, эээ... ммм ммм... ммм ммм... эээ... эээ, эээ, эээ... mhm.",
     # Belarusian — generated native fillers
-    "be": "эээ, ммм... эээ, ммм, h-h-hello, i... i will check. I went... I went to the st... store, эээ.",
+    "be": "эээ, ммм... эээ-эээ-эээ, эээ, эээ... ммм ммм... ммм ммм... эээ... эээ, эээ, эээ... mhm.",
     # Bulgarian — generated native fillers
-    "bg": "ааа, ъъъ... ааа, ъъъ, h-h-hello, i... i will check. I went... I went to the st... store, ааа.",
+    "bg": "ааа, ъъъ... ааа-ааа-ааа, ааа, ааа... ъъъ ъъъ... ъъъ ъъъ... ааа... ааа, ааа, ааа... mhm.",
     # Bengali — generated native fillers
-    "bn": "উম, এহ... উম, এহ, h-h-hello, i... i will check. I went... I went to the st... store, উম.",
+    "bn": "উম, এহ... উম-উম-উম, উম, উম... এহ এহ... এহ এহ... উম... উম, উম, উম... mhm.",
     # Tibetan — generated native fillers
-    "bo": "ཨ་མ... ཨ་མ, h-h-hello, i... i will check. I went... I went to the st... store, ཨ་མ.",
+    "bo": "ཨ, མ... ཨ-ཨ-ཨ, ཨ, ཨ... མ མ... མ མ... ཨ... ཨ, ཨ, ཨ... mhm.",
     # Breton — generated native fillers
-    "br": "euh, bah... euh, bah, h-h-hello, i... i will check. I went... I went to the st... store, euh.",
+    "br": "euh, bah... euh-euh-euh, euh, euh... bah bah... bah bah... euh... euh, euh, euh... mhm.",
     # Bosnian — generated native fillers
-    "bs": "ehm, pa... ehm, pa, h-h-hello, i... i will check. I went... I went to the st... store, ehm.",
+    "bs": "ehm, pa... ehm-ehm-ehm, ehm, ehm... pa pa... pa pa... ehm... ehm, ehm, ehm... mhm.",
     # Catalan — generated native fillers
-    "ca": "eh, hmm... eh, hmm, h-h-hello, i... i will check. I went... I went to the st... store, eh.",
+    "ca": "eh, hmm... eh-eh-eh, eh, eh... hmm hmm... hmm hmm... eh... eh, eh, eh... mhm.",
     # Czech
-    "cs": "Ehm, no, prostě... prostě vlastně, já... já šel, š-šel do, ehm, obchodu.",
+    "cs": "ehm, no... ehm-ehm-ehm, ehm, ehm... no no... no no... ehm... ehm, ehm, ehm... mhm.",
     # Welsh — generated native fillers
-    "cy": "ym, ych... ym, ych, h-h-hello, i... i will check. I went... I went to the st... store, ym.",
+    "cy": "ym, ych... ym-ym-ym, ym, ym... ych ych... ych ych... ym... ym, ym, ym... mhm.",
     # Danish
-    "da": "Øh, altså... altså ligesom, jeg... jeg gik, g-gik til, øh, butikken.",
+    "da": "øh, altså... øh-øh-øh, øh, øh... altså altså... altså altså... øh... øh, øh, øh... mhm.",
     # German
-    "de": "Ähm, äh, hm, also... also ich, ne, ich woll... wollte sagen, ich bin ge-gegangen, äh, genau.",
+    "de": "Ähm, äh... d-d-das, das, das... a-also... also, es ist... es ist... j-j-ja, ja, ja. N-n-nein... mhm.",
     # Greek
-    "el": "Εμ, δηλαδή... δηλαδή, ε, εγώ... εγώ πήγα, πή-πήγα στο, εμ, μαγαζί.",
+    "el": "εμ, δηλαδή... εμ-εμ-εμ, εμ, εμ... δηλαδή δηλαδή... δηλαδή δηλαδή... εμ... εμ, εμ, εμ... mhm.",
     # English
-    "en": "Umm, yyy, eh, mmm, tsk, h-h-hello, i... i will check. I went... I went to the st... store, you know.",
+    "en": "Umm, yyy... th-the, the, the... I mean... I mean, it is... it is just... wha... what... o-o-ok. So, so, so... mhm.",
     # Spanish
-    "es": "Eh, este... este, o sea, mmm, bueno, h-h-hello, i... i will check. I went... I went to the st... store, ¿no?",
+    "es": "Eh, mmm... e-e-el, el, el... o sea... o sea, es que... es que... b-b-bueno, bueno, bueno. S-s-si... mhm.",
     # Estonian — generated native fillers
-    "et": "ee, mm... ee, mm, h-h-hello, i... i will check. I went... I went to the st... store, ee.",
+    "et": "ee, mm... ee-ee-ee, ee, ee... mm mm... mm mm... ee... ee, ee, ee... mhm.",
     # Basque — generated native fillers
-    "eu": "eh, ba... eh, ba, h-h-hello, i... i will check. I went... I went to the st... store, eh.",
+    "eu": "eh, ba... eh-eh-eh, eh, eh... ba ba... ba ba... eh... eh, eh, eh... mhm.",
     # Persian — generated native fillers
-    "fa": "um, eh... um, eh, h-h-hello, i... i will check. I went... I went to the st... store, um.",
+    "fa": "um, eh... um-um-um, um, um... eh eh... eh eh... um... um, um, um... mhm.",
     # Finnish
-    "fi": "Öö, tota... tota niinku, h-h-hello, i... i will check. I went... I went to the st... store, öö.",
+    "fi": "öö, tota... öö-öö-öö, öö, öö... tota tota... tota tota... öö... öö, öö, öö... mhm.",
     # Faroese — generated native fillers
-    "fo": "øh, hmm... øh, hmm, h-h-hello, i... i will check. I went... I went to the st... store, øh.",
+    "fo": "øh, hmm... øh-øh-øh, øh, øh... hmm hmm... hmm hmm... øh... øh, øh, øh... mhm.",
     # French
-    "fr": "Euh, ben, voilà... voilà donc, hm, j-j'ai, je vou... voulais dire, je suis al-allé, euh, voilà.",
+    "fr": "Euh, mmm... l-l-le, le, le... c'est... c'est-à-dire... c'est-à-dire, c'est... c'est... o-o-oui, oui, oui. N-n-non... mhm.",
     # Galician — generated native fillers
-    "gl": "eh, hmm... eh, hmm, h-h-hello, i... i will check. I went... I went to the st... store, eh.",
+    "gl": "eh, hmm... eh-eh-eh, eh, eh... hmm hmm... hmm hmm... eh... eh, eh, eh... mhm.",
     # Gujarati — generated native fillers
-    "gu": "ઉમ, એહ... ઉમ, એહ, h-h-hello, i... i will check. I went... I went to the st... store, ઉમ.",
+    "gu": "ઉમ, એહ... ઉમ-ઉમ-ઉમ, ઉમ, ઉમ... એહ એહ... એહ એહ... ઉમ... ઉમ, ઉમ, ઉમ... mhm.",
     # Hausa — generated native fillers
-    "ha": "uhm, toh... uhm, toh, h-h-hello, i... i will check. I went... I went to the st... store, uhm.",
+    "ha": "uhm, toh... uhm-uhm-uhm, uhm, uhm... toh toh... toh toh... uhm... uhm, uhm, uhm... mhm.",
     # Hawaiian — generated native fillers
-    "haw": "ʻō, um... ʻō, um, h-h-hello, i... i will check. I went... I went to the st... store, ʻō.",
+    "haw": "ʻō, um... ʻō-ʻō-ʻō, ʻō, ʻō... um um... um um... ʻō... ʻō, ʻō, ʻō... mhm.",
     # Hebrew
-    "he": "אמ, כלומר... כלומר, נו, אני... אני הלכתי, ה-הלכתי ל, אמ, חנות.",
+    "he": "אמ, כלומר... אמ-אמ-אמ, אמ, אמ... כלומר כלומר... כלומר כלומר... אמ... אמ, אמ, אמ... mhm.",
     # Hindi
-    "hi": "मतलब, हां, अच्छा, वो... वो, म-मैं गया, म-मतलब दुकान को, हां।",
+    "hi": "मतलब, ह... मतलब-मतलब-मतलब, मतलब, मतलब... ह ह... ह ह... मतलब... मतलब, मतलब, मतलब... mhm.",
     # Croatian — generated native fillers
-    "hr": "ehm, pa... ehm, pa, h-h-hello, i... i will check. I went... I went to the st... store, ehm.",
+    "hr": "ehm, pa... ehm-ehm-ehm, ehm, ehm... pa pa... pa pa... ehm... ehm, ehm, ehm... mhm.",
     # Haitian Creole — generated native fillers
-    "ht": "en, um... en, um, h-h-hello, i... i will check. I went... I went to the st... store, en.",
+    "ht": "en, um... en-en-en, en, en... um um... um um... en... en, en, en... mhm.",
     # Hungarian
-    "hu": "Hm, tehát... tehát szóval, izé, én... én mentem, me-mentem a, hm, boltba.",
+    "hu": "hm, tehát... hm-hm-hm, hm, hm... tehát tehát... tehát tehát... hm... hm, hm, hm... mhm.",
     # Armenian — generated native fillers
-    "hy": "ըըը, մմմ... ըըը, մմմ, h-h-hello, i... i will check. I went... I went to the st... store, ըըը.",
+    "hy": "ըըը, մմմ... ըըը-ըըը-ըըը, ըըը, ըըը... մմմ մմմ... մմմ մմմ... ըըը... ըըը, ըըը, ըըը... mhm.",
     # Indonesian — generated native fillers
-    "id": "anu, em... anu, em, h-h-hello, i... i will check. I went... I went to the st... store, anu.",
+    "id": "anu, em... anu-anu-anu, anu, anu... em em... em em... anu... anu, anu, anu... mhm.",
     # Icelandic — generated native fillers
-    "is": "öh, hmm... öh, hmm, h-h-hello, i... i will check. I went... I went to the st... store, öh.",
+    "is": "öh, hmm... öh-öh-öh, öh, öh... hmm hmm... hmm hmm... öh... öh, öh, öh... mhm.",
     # Italian
-    "it": "Ehm, cioè... cioè, sai, mmm, h-h-hello, i... i will check. I went... I went to the st... store, no?",
+    "it": "Ehm, mmm... i-i-il, il, il... c-cioè... cioè, è che... è che... s-s-si, si, si. N-n-no... mhm.",
     # Japanese
-    "ja": "えーと、あの、んー、わ-わたしは、い...いきました、そのー。",
+    "ja": "えーと, あの... えーと-えーと-えーと, えーと, えーと... あの あの... あの あの... えーと... えーと, えーと, えーと... mhm.",
     # Javanese — generated native fillers
-    "jw": "anu, em... anu, em, h-h-hello, i... i will check. I went... I went to the st... store, anu.",
+    "jw": "anu, em... anu-anu-anu, anu, anu... em em... em em... anu... anu, anu, anu... mhm.",
     # Georgian — generated native fillers
-    "ka": "აა, მმ... აა, მმ, h-h-hello, i... i will check. I went... I went to the st... store, აა.",
+    "ka": "აა, მმ... აა-აა-აა, აა, აა... მმ მმ... მმ მმ... აა... აა, აა, აა... mhm.",
     # Kazakh — generated native fillers
-    "kk": "эээ, ммм... эээ, ммм, h-h-hello, i... i will check. I went... I went to the st... store, эээ.",
+    "kk": "эээ, ммм... эээ-эээ-эээ, эээ, эээ... ммм ммм... ммм ммм... эээ... эээ, эээ, эээ... mhm.",
     # Khmer — generated native fillers
-    "km": "អឺ, អឹម... អឺ, អឹម, h-h-hello, i... i will check. I went... I went to the st... store, អឺ.",
+    "km": "អ, អ... អ-អ-អ, អ, អ... អ អ... អ អ... អ... អ, អ, អ... mhm.",
     # Kannada — generated native fillers
-    "kn": "ಉಮ್, ಎಹ್... ಉಮ್, ಎಹ್, h-h-hello, i... i will check. I went... I went to the st... store, ಉಮ್.",
+    "kn": "ಉಮ, ಎಹ... ಉಮ-ಉಮ-ಉಮ, ಉಮ, ಉಮ... ಎಹ ಎಹ... ಎಹ ಎಹ... ಉಮ... ಉಮ, ಉಮ, ಉಮ... mhm.",
     # Korean
-    "ko": "음, 어, 그... 그러니까, 뭐, 나-나는, 갔...갔어요, 음.",
+    "ko": "음, 어... 음-음-음, 음, 음... 어 어... 어 어... 음... 음, 음, 음... mhm.",
     # Latin — generated native fillers
-    "la": "ehem, um... ehem, um, h-h-hello, i... i will check. I went... I went to the st... store, ehem.",
+    "la": "ehem, um... ehem-ehem-ehem, ehem, ehem... um um... um um... ehem... ehem, ehem, ehem... mhm.",
     # Luxembourgish — generated native fillers
-    "lb": "ehm, majo... ehm, majo, h-h-hello, i... i will check. I went... I went to the st... store, ehm.",
+    "lb": "ehm, majo... ehm-ehm-ehm, ehm, ehm... majo majo... majo majo... ehm... ehm, ehm, ehm... mhm.",
     # Lingala — generated native fillers
-    "ln": "euh, um... euh, um, h-h-hello, i... i will check. I went... I went to the st... store, euh.",
+    "ln": "euh, um... euh-euh-euh, euh, euh... um um... um um... euh... euh, euh, euh... mhm.",
     # Lao — generated native fillers
-    "lo": "ເອີ, ອືມ... ເອີ, ອືມ, h-h-hello, i... i will check. I went... I went to the st... store, ເອີ.",
+    "lo": "ເອ, ອ... ເອ-ເອ-ເອ, ເອ, ເອ... ອ ອ... ອ ອ... ເອ... ເອ, ເອ, ເອ... mhm.",
     # Lithuanian — generated native fillers
-    "lt": "ėė, mm... ėė, mm, h-h-hello, i... i will check. I went... I went to the st... store, ėė.",
+    "lt": "ėė, mm... ėė-ėė-ėė, ėė, ėė... mm mm... mm mm... ėė... ėė, ėė, ėė... mhm.",
     # Latvian — generated native fillers
-    "lv": "ēē, mm... ēē, mm, h-h-hello, i... i will check. I went... I went to the st... store, ēē.",
+    "lv": "ēē, mm... ēē-ēē-ēē, ēē, ēē... mm mm... mm mm... ēē... ēē, ēē, ēē... mhm.",
     # Malagasy — generated native fillers
-    "mg": "euh, um... euh, um, h-h-hello, i... i will check. I went... I went to the st... store, euh.",
+    "mg": "euh, um... euh-euh-euh, euh, euh... um um... um um... euh... euh, euh, euh... mhm.",
     # Maori — generated native fillers
-    "mi": "ā, um... ā, um, h-h-hello, i... i will check. I went... I went to the st... store, ā.",
+    "mi": "ā, um... ā-ā-ā, ā, ā... um um... um um... ā... ā, ā, ā... mhm.",
     # Macedonian — generated native fillers
-    "mk": "ааа, еее... ааа, еее, h-h-hello, i... i will check. I went... I went to the st... store, ааа.",
+    "mk": "ааа, еее... ааа-ааа-ааа, ааа, ааа... еее еее... еее еее... ааа... ааа, ааа, ааа... mhm.",
     # Malayalam — generated native fillers
-    "ml": "ഉം, ഏഹ്... ഉം, ഏഹ്, h-h-hello, i... i will check. I went... I went to the st... store, ഉം.",
+    "ml": "ഉ, ഏഹ... ഉ-ഉ-ഉ, ഉ, ഉ... ഏഹ ഏഹ... ഏഹ ഏഹ... ഉ... ഉ, ഉ, ഉ... mhm.",
     # Mongolian — generated native fillers
-    "mn": "ээ, мм... ээ, мм, h-h-hello, i... i will check. I went... I went to the st... store, ээ.",
+    "mn": "ээ, мм... ээ-ээ-ээ, ээ, ээ... мм мм... мм мм... ээ... ээ, ээ, ээ... mhm.",
     # Marathi — generated native fillers
-    "mr": "उम, एह... उम, एह, h-h-hello, i... i will check. I went... I went to the st... store, उम.",
+    "mr": "उम, एह... उम-उम-उम, उम, उम... एह एह... एह एह... उम... उम, उम, उम... mhm.",
     # Malay — generated native fillers
-    "ms": "anu, em... anu, em, h-h-hello, i... i will check. I went... I went to the st... store, anu.",
+    "ms": "anu, em... anu-anu-anu, anu, anu... em em... em em... anu... anu, anu, anu... mhm.",
     # Maltese — generated native fillers
-    "mt": "ehm, mela... ehm, mela, h-h-hello, i... i will check. I went... I went to the st... store, ehm.",
+    "mt": "ehm, mela... ehm-ehm-ehm, ehm, ehm... mela mela... mela mela... ehm... ehm, ehm, ehm... mhm.",
     # Myanmar — generated native fillers
-    "my": "အင်း, အဲ... အင်း, အဲ, h-h-hello, i... i will check. I went... I went to the st... store, အင်း.",
+    "my": "အင, အ... အင-အင-အင, အင, အင... အ အ... အ အ... အင... အင, အင, အင... mhm.",
     # Nepali — generated native fillers
-    "ne": "उम, एह... उम, एह, h-h-hello, i... i will check. I went... I went to the st... store, उम.",
+    "ne": "उम, एह... उम-उम-उम, उम, उम... एह एह... एह एह... उम... उम, उम, उम... mhm.",
     # Dutch
-    "nl": "Ehm, dus... dus zeg maar, mmm, h-h-hello, i... i will check. I went... I went to the st... store, toch?",
+    "nl": "Ehm, mmm... d-d-de, de, de... i-ik bedoel... ik bedoel, het is... het is... j-j-ja, ja, ja. N-n-nee... mhm.",
     # Norwegian Nynorsk — generated native fillers
-    "nn": "øhm, liksom... øhm, liksom, h-h-hello, i... i will check. I went... I went to the st... store, øhm.",
+    "nn": "øhm, liksom... øhm-øhm-øhm, øhm, øhm... liksom liksom... liksom liksom... øhm... øhm, øhm, øhm... mhm.",
     # Norwegian
-    "no": "Øhm, eh, liksom... liksom altså, jeg... jeg gikk, g-gikk til, øhm, butikken.",
+    "no": "øhm, eh... øhm-øhm-øhm, øhm, øhm... eh eh... eh eh... øhm... øhm, øhm, øhm... mhm.",
     # Occitan — generated native fillers
-    "oc": "euh, ben... euh, ben, h-h-hello, i... i will check. I went... I went to the st... store, euh.",
+    "oc": "euh, ben... euh-euh-euh, euh, euh... ben ben... ben ben... euh... euh, euh, euh... mhm.",
     # Punjabi — generated native fillers
-    "pa": "ਉਮ, ਏਹ... ਉਮ, ਏਹ, h-h-hello, i... i will check. I went... I went to the st... store, ਉਮ.",
+    "pa": "ਉਮ, ਏਹ... ਉਮ-ਉਮ-ਉਮ, ਉਮ, ਉਮ... ਏਹ ਏਹ... ਏਹ ਏਹ... ਉਮ... ਉਮ, ਉਮ, ਉਮ... mhm.",
     # Polish
-    "pl": "Yyy, eee, eeee, yyyy, no tak, znaczy... znaczy, h-h-hello, i... i will check. I went... I went to the st... store, no właśnie.",
+    "pl": "Yyy, eee... t-t-to, to, to... z-znaczy... znaczy, to jest... to jest... ta... tak, tak, tak. N-n-nie... mhm.",
     # Pashto — generated native fillers
-    "ps": "امم, اې... امم, اې, h-h-hello, i... i will check. I went... I went to the st... store, امم.",
+    "ps": "امم, اې... امم-امم-امم, امم, امم... اې اې... اې اې... امم... امم, امم, امم... mhm.",
     # Portuguese
-    "pt": "É, né, ahn... ahn, então, h-h-hello, i... i will check. I went... I went to the st... store, né?",
+    "pt": "É, mmm... o-o-o, o, o... q-quer dizer... quer dizer, é que... é que... s-s-sim, sim, sim. N-n-não... mhm.",
     # Romanian
-    "ro": "Ăă, deci, adică... adică, păi, eu... eu am mers, am-am mers la, ăă, magazin.",
+    "ro": "ăă, deci... ăă-ăă-ăă, ăă, ăă... deci deci... deci deci... ăă... ăă, ăă, ăă... mhm.",
     # Russian
-    "ru": "Эм, ну, значит... значит, h-h-hello, i... i will check. I went... I went to the st... store, ну вот.",
+    "ru": "Эм, ммм... э-э-это, это, это... з-значит... значит, это... это... д-д-да, да, да. Н-н-нет... угу.",
     # Sanskrit — generated native fillers
-    "sa": "उम्, एह्... उम्, एह्, h-h-hello, i... i will check. I went... I went to the st... store, उम्.",
+    "sa": "उम, एह... उम-उम-उम, उम, उम... एह एह... एह एह... उम... उम, उम, उम... mhm.",
     # Sindhi — generated native fillers
-    "sd": "امم, اې... امم, اې, h-h-hello, i... i will check. I went... I went to the st... store, امم.",
+    "sd": "امم, اې... امم-امم-امم, امم, امم... اې اې... اې اې... امم... امم, امم, امم... mhm.",
     # Sinhala — generated native fillers
-    "si": "උම්, එහ්... උම්, එහ්, h-h-hello, i... i will check. I went... I went to the st... store, උම්.",
+    "si": "උම, එහ... උම-උම-උම, උම, උම... එහ එහ... එහ එහ... උම... උම, උම, උම... mhm.",
     # Slovak
-    "sk": "Ehm, no, teda... teda vlastne, h-h-hello, i... i will check. I went... I went to the st... store, ehm.",
+    "sk": "ehm, no... ehm-ehm-ehm, ehm, ehm... no no... no no... ehm... ehm, ehm, ehm... mhm.",
     # Slovenian — generated native fillers
-    "sl": "um, eh... um, eh, h-h-hello, i... i will check. I went... I went to the st... store, um.",
+    "sl": "um, eh... um-um-um, um, um... eh eh... eh eh... um... um, um, um... mhm.",
     # Shona — generated native fillers
-    "sn": "ehm, um... ehm, um, h-h-hello, i... i will check. I went... I went to the st... store, ehm.",
+    "sn": "ehm, um... ehm-ehm-ehm, ehm, ehm... um um... um um... ehm... ehm, ehm, ehm... mhm.",
     # Somali — generated native fillers
-    "so": "ee, um... ee, um, h-h-hello, i... i will check. I went... I went to the st... store, ee.",
+    "so": "ee, um... ee-ee-ee, ee, ee... um um... um um... ee... ee, ee, ee... mhm.",
     # Albanian — generated native fillers
-    "sq": "ëëë, hmm... ëëë, hmm, h-h-hello, i... i will check. I went... I went to the st... store, ëëë.",
+    "sq": "ëëë, hmm... ëëë-ëëë-ëëë, ëëë, ëëë... hmm hmm... hmm hmm... ëëë... ëëë, ëëë, ëëë... mhm.",
     # Serbian — generated native fillers
-    "sr": "ehm, pa... ehm, pa, h-h-hello, i... i will check. I went... I went to the st... store, ehm.",
+    "sr": "ehm, pa... ehm-ehm-ehm, ehm, ehm... pa pa... pa pa... ehm... ehm, ehm, ehm... mhm.",
     # Sundanese — generated native fillers
-    "su": "euh, em... euh, em, h-h-hello, i... i will check. I went... I went to the st... store, euh.",
+    "su": "euh, em... euh-euh-euh, euh, euh... em em... em em... euh... euh, euh, euh... mhm.",
     # Swedish
-    "sv": "Öh, eh, alltså... alltså liksom, h-h-hello, i... i will check. I went... I went to the st... store, öh.",
+    "sv": "öh, eh... öh-öh-öh, öh, öh... eh eh... eh eh... öh... öh, öh, öh... mhm.",
     # Swahili — generated native fillers
-    "sw": "eh, um... eh, um, h-h-hello, i... i will check. I went... I went to the st... store, eh.",
+    "sw": "eh, um... eh-eh-eh, eh, eh... um um... um um... eh... eh, eh, eh... mhm.",
     # Tamil — generated native fillers
-    "ta": "உம், ஏஹ்... உம், ஏஹ், h-h-hello, i... i will check. I went... I went to the st... store, உம்.",
+    "ta": "உம, ஏஹ... உம-உம-உம, உம, உம... ஏஹ ஏஹ... ஏஹ ஏஹ... உம... உம, உம, உம... mhm.",
     # Telugu — generated native fillers
-    "te": "ఉమ్, ఏహ్... ఉమ్, ఏహ్, h-h-hello, i... i will check. I went... I went to the st... store, ఉమ్.",
+    "te": "ఉమ, ఏహ... ఉమ-ఉమ-ఉమ, ఉమ, ఉమ... ఏహ ఏహ... ఏహ ఏహ... ఉమ... ఉమ, ఉమ, ఉమ... mhm.",
     # Tajik — generated native fillers
-    "tg": "эээ, ммм... эээ, ммм, h-h-hello, i... i will check. I went... I went to the st... store, эээ.",
+    "tg": "эээ, ммм... эээ-эээ-эээ, эээ, эээ... ммм ммм... ммм ммм... эээ... эээ, эээ, эээ... mhm.",
     # Thai — generated native fillers
-    "th": "เอ้อ, อืม... เอ้อ, อืม, h-h-hello, i... i will check. I went... I went to the st... store, เอ้อ.",
+    "th": "เอ้อ, อืม... เอ้อ-เอ้อ-เอ้อ, เอ้อ, เอ้อ... อืม อืม... อืม อืม... เอ้อ... เอ้อ, เอ้อ, เอ้อ... mhm.",
     # Turkmen — generated native fillers
-    "tk": "eee, mmm... eee, mmm, h-h-hello, i... i will check. I went... I went to the st... store, eee.",
+    "tk": "eee, mmm... eee-eee-eee, eee, eee... mmm mmm... mmm mmm... eee... eee, eee, eee... mhm.",
     # Tagalog — generated native fillers
-    "tl": "ano, um... ano, um, h-h-hello, i... i will check. I went... I went to the st... store, ano.",
+    "tl": "ano, um... ano-ano-ano, ano, ano... um um... um um... ano... ano, ano, ano... mhm.",
     # Turkish
-    "tr": "Şey, yani... yani, hm, h-h-hello, i... i will check. I went... I went to the st... store, yani.",
+    "tr": "şey, yani... şey-şey-şey, şey, şey... yani yani... yani yani... şey... şey, şey, şey... mhm.",
     # Tatar — generated native fillers
-    "tt": "эээ, ммм... эээ, ммм, h-h-hello, i... i will check. I went... I went to the st... store, эээ.",
+    "tt": "эээ, ммм... эээ-эээ-эээ, эээ, эээ... ммм ммм... ммм ммм... эээ... эээ, эээ, эээ... mhm.",
     # Ukrainian
-    "uk": "Ееее, ммм, ну, значить... значить, h-h-hello, i... i will check. I went... I went to the st... store, ну.",
+    "uk": "Еее, ммм... ц-ц-це, це, це... з-значить... значить, це... це... т-т-так, так, так. Н-н-ні... угу.",
     # Urdu — generated native fillers
-    "ur": "اُم، اے... اُم، اے, h-h-hello, i... i will check. I went... I went to the st... store, اُم، اے.",
+    "ur": "اُم،, اے... اُم،-اُم،-اُم،, اُم،, اُم،... اے اے... اے اے... اُم،... اُم،, اُم،, اُم،... mhm.",
     # Uzbek — generated native fillers
-    "uz": "eee, mmm... eee, mmm, h-h-hello, i... i will check. I went... I went to the st... store, eee.",
+    "uz": "eee, mmm... eee-eee-eee, eee, eee... mmm mmm... mmm mmm... eee... eee, eee, eee... mhm.",
     # Vietnamese — generated native fillers
-    "vi": "ờ, ừm... ờ, ừm, h-h-hello, i... i will check. I went... I went to the st... store, ờ.",
+    "vi": "ờ, ừm... ờ-ờ-ờ, ờ, ờ... ừm ừm... ừm ừm... ờ... ờ, ờ, ờ... mhm.",
     # Yiddish — generated native fillers
-    "yi": "אהם, עה... אהם, עה, h-h-hello, i... i will check. I went... I went to the st... store, אהם.",
+    "yi": "אהם, עה... אהם-אהם-אהם, אהם, אהם... עה עה... עה עה... אהם... אהם, אהם, אהם... mhm.",
     # Yoruba — generated native fillers
-    "yo": "ẹn, um... ẹn, um, h-h-hello, i... i will check. I went... I went to the st... store, ẹn.",
+    "yo": "ẹn, um... ẹn-ẹn-ẹn, ẹn, ẹn... um um... um um... ẹn... ẹn, ẹn, ẹn... mhm.",
     # Chinese
-    "zh": "那个，就是，嗯，啊，h-h-hello, i... i will check. I went... I went to the st... store, 就是。",
+    "zh": "那个, 就是... 那个-那个-那个, 那个, 那个... 就是 就是... 就是 就是... 那个... 那个, 那个, 那个... mhm.",
     # Cantonese — generated native fillers
-    "yue": "嗰個, 呢... 嗰個, 呢, h-h-hello, i... i will check. I went... I went to the st... store, 嗰個.",
+    "yue": "嗰個, 呢... 嗰個-嗰個-嗰個, 嗰個, 嗰個... 呢 呢... 呢 呢... 嗰個... 嗰個, 嗰個, 嗰個... mhm.",
 }
 
 def get_whisper_prompt_for_lang(lang, user_custom_prompt=None):
@@ -358,6 +359,7 @@ DEFAULT_USER_DATA = {
 # DO NOT include track/timeline/model selections here — those belong to main UI state.
 # ==========================================
 DEFAULT_SETTINGS = {
+    "settings_version":     VERSION,
     # ── Transcript / Editor ──────────────────────────────────────────────────
     "editor_font_family":   get_system_font_name(),
     "editor_font_size":     12,
@@ -396,10 +398,10 @@ DEFAULT_SETTINGS = {
     "ai_beam_size":             1,
     "ai_temperature":           0.0,
     "ai_condition_on_prev":     False,
-    "ai_logprob_threshold":     -1.0,
-    "ai_no_speech_threshold":   0.2,
+    "ai_logprob_threshold":     -0.8,
+    "ai_no_speech_threshold":   0.7,
     "ai_patience":              1.0,
-    "ai_compression_ratio_threshold": 10.0,
+    "ai_compression_ratio_threshold": 2.4,
     "ai_no_repeat_ngram_size":  0,
     "ai_regroup":               False,
     "ai_suppress_silence":      False,
@@ -407,7 +409,7 @@ DEFAULT_SETTINGS = {
     "ai_k_size":                5,
     # ── App / UI ────────────────────────────────────────────────────────────
     "gui_lang":             "en",
-    "always_on_top":        True,
+    "always_on_top":        False,
     "hidden_panels":        [],
     "accent_color":         "green",
     "app_icon":             "default",
