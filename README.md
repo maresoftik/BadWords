@@ -33,7 +33,7 @@ BadWords does **80% of the tedious work for you** (cutting tight silences, marki
    * 🔴 **Red** — Filler words / obvious mistakes to remove
    * 🔵 **Blue** — Retakes / duplicates
    * 🟢 **Green** — Typos / close matches
-3. **Compare to Script:** If you have an original script, BadWords can automatically compare it against your transcript to highlight missing lines and deviations. *(Standalone analysis without a script is currently still in the works!)*
+3. **Compare to Script or Analyze Standalone:** If you have an original script, BadWords can automatically compare it against your transcript to highlight deviations. No script? No problem! Use the Standalone Analysis to automatically detect stutters, false starts, and retakes from the raw audio.
 4. **Assemble Timeline:** Once you're done playing with the text, hit Assemble. BadWords automatically generates a **brand new, clean timeline** inside Resolve with all your cuts and color markers applied perfectly.
 
 <p align="center">
@@ -49,14 +49,20 @@ BadWords does **80% of the tedious work for you** (cutting tight silences, marki
 
 ---
 
-## 🔥 What's New in 3.0?
+## 🔥 What's New in 3.1?
 
-Version 3.0 is the biggest update yet — completely rewriting the core of the app:
-* **IDE-Inspired Interface:** I ditched the simple Tkinter UI for a powerful `PySide6` interface, directly inspired by tools like VS Code. Enjoy custom sidebars, completely draggable and readjustable panels, and a sleek settings menu.
-* **EXTREME Precision:** Version 3.0 comes with Ultra Precise Mode which uses chunking feature to NOT MISS A SINGLE STUTTER. The time of transcription can get higher
-* **Custom Markers:** Create your own named markers from 11 available DaVinci Resolve colors to categorize clips exactly how you want.
+Version 3.1 is a huge step up. I spent a lot of time rewriting how the analysis actually works and adding things that make using the app a lot less annoying. Here is what I managed to build:
 
-**...and this is just the beginning.** The new UI is still heavily in development, and future updates are planned to include side-by-side script comparison views, ultra-precise captions, and standalone filler word detection without needing a base script.
+* **Standalone Analysis:** You no longer need a base script! BadWords can now just scan your raw audio and figure out where you stuttered, had false starts, or corrected yourself.
+* **Smarter Compare Algorithm:** Before, if you repeated a line 3 times, it would color all 3. I rewrote the logic so it now *only* marks the bad takes, leaving your final, good take completely clean.
+* **Side-By-Side View (Beta):** I added a new mode where you can view your original script and the transcript right next to each other. It makes checking for mistakes way faster.
+* **Advanced Settings Unlocked:** I opened up the engine. You can now tweak the AI thresholds, change chunking settings, and manage file paths directly in the UI if you want to experiment.
+* **Quality of Life:**
+  * **CTRL + Click:** You can now hold CTRL and click on a word to instantly jump to it.
+  * **Direct Feedback:** I added a Support tab so you can message me or report bugs directly from the app instead of having to go to GitHub/Reddit or emailing me.
+  * **Info:** Added transcription time stats and helpful tooltips across the UI to explain what different settings actually do.
+* **Bug Fixes & Tweaks:** I fixed a few things under the hood and made both the installer and the app much more robust, so it should now run smoother even on more specific setups. Also, a huge thank you for all the bug reports and feedback you guys have been sending me via email and Reddit!
+
 
 ---
 
