@@ -441,8 +441,6 @@ except Exception as e:
             # Stage 6A: Use user's custom initial prompt if set, else fall back to DEFAULT_WHISPER_PROMPT
             base_prompt = initial_prompt if initial_prompt else config.DEFAULT_WHISPER_PROMPT
             initial_prompt_str = base_prompt
-            if filler_words_list:
-                initial_prompt_str += f" {', '.join(filler_words_list)}"
 
         kwargs_str = ""
         if prefs.get('ai_length_penalty', 1.0) != 1.0:
