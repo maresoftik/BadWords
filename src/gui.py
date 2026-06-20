@@ -1718,7 +1718,7 @@ class TranscriptionCanvas(QWidget):
         prefs = self.main_window.engine.load_preferences() or {}
         pref_family = prefs.get('editor_font_family', config.UI_FONT_NAME)
         pref_size = prefs.get('editor_font_size', 12)
-        pref_lh = prefs.get('editor_line_height', 8)
+        pref_lh = prefs.get('editor_line_height', 7)
         view_mode = prefs.get('view_mode', 'continuous')
         
         is_rtl = False
@@ -5444,7 +5444,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         'snap_max':           0.25,
         'editor_font_family': config.UI_FONT_NAME,
         'editor_font_size':   12,
-        'editor_line_height': 12,
+        'editor_line_height': 7,
         'theme':              'dark',
         'always_on_top':      False,
         'hidden_panels':      [],
@@ -5512,7 +5512,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             QStackedWidget {{
                 background-color: {config.BG_COLOR};
             }}
-            QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox {{
+            QLineEdit, QTextEdit, QDoubleSpinBox, QSpinBox, QComboBox {{
                 background-color: {config.INPUT_BG};
                 color: {config.INPUT_FG};
                 border: 1px solid #3a3a3a;
@@ -5520,7 +5520,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
                 border-radius: 3px;
                 outline: none;
             }}
-            QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus {{
+            QLineEdit:focus, QTextEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus {{
                 border: 1px solid {config.BTN_BG};
                 outline: none;
             }}
@@ -5643,18 +5643,16 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         self.stack = QStackedWidget()
         right_layout.addWidget(self.stack)
 
-        # Connect list → stack
-        self.category_list.currentRowChanged.connect(self.stack.setCurrentIndex)
-
         self._build_ui()
-
-        # ─────────────────────────────────────────────────────────────────
-        # BOTTOM BUTTON BAR (separator + row)
-        # ─────────────────────────────────────────────────────────────────
+        self.w_footer = QWidget()
+        l_footer = QVBoxLayout(self.w_footer)
+        l_footer.setContentsMargins(0, 0, 0, 0)
+        l_footer.setSpacing(0)
+        
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
         sep.setStyleSheet(f"background: {config.SEPARATOR_COL}; max-height: 1px; border: none;")
-        right_layout.addWidget(sep)
+        l_footer.addWidget(sep)
 
         btn_bar = QHBoxLayout()
         btn_bar.setContentsMargins(16, 10, 16, 12)
@@ -5687,7 +5685,19 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         self.btn_apply.clicked.connect(self._apply_settings)
         btn_bar.addWidget(self.btn_apply)
 
-        right_layout.addLayout(btn_bar)
+        l_footer.addLayout(btn_bar)
+        right_layout.addWidget(self.w_footer)
+
+        # Connect list → stack
+        def _on_tab_changed(idx):
+            self.stack.setCurrentIndex(idx)
+            item = self.category_list.item(idx)
+            if item and item.text() == self.txt("tab_support"):
+                self.w_footer.hide()
+            else:
+                self.w_footer.show()
+                
+        self.category_list.currentRowChanged.connect(_on_tab_changed)
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -5716,14 +5726,15 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self.category_list.addItem(self.txt("tab_shortcuts"))
             self.category_list.addItem(self.txt("tab_custom_markers"))
             self.category_list.addItem(self.txt("tab_telemetry"))
+            self.category_list.addItem(self.txt("tab_support"))
         else:
             self.category_list.addItem(self.txt("tab_general"))
             self.category_list.addItem(self.txt("tab_transcript"))
             self.category_list.addItem(self.txt("tab_shortcuts"))
             self.category_list.addItem(self.txt("tab_custom_markers"))
             self.category_list.addItem(self.txt("tab_ai_engine"))
-
             self.category_list.addItem(self.txt("tab_telemetry"))
+            self.category_list.addItem(self.txt("tab_support"))
 
         self.category_list.setCurrentRow(0)
 
@@ -6538,11 +6549,30 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         l_transcript.addLayout(form_transcript)
 
         # Font preview
-        self.lbl_preview = QLabel()
-        self.lbl_preview.setTextFormat(Qt.TextFormat.RichText)
-        self.lbl_preview.setWordWrap(True)
-        self.lbl_preview.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.lbl_preview.setMinimumHeight(90)
+        from PySide6.QtWidgets import QTextEdit
+        self.lbl_preview = QTextEdit()
+        self.lbl_preview.setReadOnly(True)
+        self.lbl_preview.setFocusPolicy(Qt.NoFocus)
+        self.lbl_preview.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.lbl_preview.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.lbl_preview.setFrameShape(QFrame.NoFrame)
+        self.lbl_preview.document().setDocumentMargin(0)
+        self.lbl_preview.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.lbl_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        
+        def _update_preview_height(_=None):
+            try:
+                lh = self.spin_lheight.value()
+                # Document size includes lh added to the bottom of the last line.
+                # We subtract lh to get the actual visual height, then add 24px padding.
+                new_h = int(self.lbl_preview.document().size().height()) - lh + 24
+                # Ensure height doesn't become too small due to calculation artifacts
+                new_h = max(30, new_h)
+                if self.lbl_preview.height() != new_h:
+                    self.lbl_preview.setFixedHeight(new_h)
+            except: pass
+            
+        self.lbl_preview.document().documentLayout().documentSizeChanged.connect(_update_preview_height)
         self.lbl_preview.setStyleSheet(f"background-color: #1a1a1a; border: 1px solid #333; border-radius: 4px; color: {config.FG_COLOR}; padding: 12px 14px;")
         l_transcript.addSpacing(10)
         l_transcript.addWidget(self.lbl_preview)
@@ -6893,6 +6923,305 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
 
 
         _add_page_to_stack(page_telem)
+
+        # ─────────────────────────────────────────────────────────────────
+        # PAGE 9 — SUPPORT
+        # ─────────────────────────────────────────────────────────────────
+        page_support = QWidget()
+        page_support.setStyleSheet("background: transparent;")
+        l_support = QVBoxLayout(page_support)
+        l_support.setContentsMargins(24, 20, 24, 16)
+        l_support.setSpacing(12)
+
+        lbl_support_info = QLabel(self.txt("msg_support_info"))
+        lbl_support_info.setWordWrap(True)
+        lbl_support_info.setStyleSheet("color: #AAAAAA; font-size: 9pt;")
+        l_support.addWidget(lbl_support_info)
+
+        # Logs location
+        import os
+        log_file_path = getattr(self.engine.os_doc, 'log_file', '')
+        if not log_file_path:
+            log_file_path = os.path.join(getattr(self.engine.os_doc, 'install_dir', ''), 'badwords_debug.log')
+        log_dir = os.path.dirname(log_file_path) if log_file_path else ''
+            
+        w_logs = QWidget()
+        l_logs = QHBoxLayout(w_logs)
+        l_logs.setContentsMargins(0, 0, 0, 0)
+        l_logs.setSpacing(8)
+        lbl_logs = QLabel(self.txt("lbl_logs_path"))
+        lbl_logs.setStyleSheet("color: #CCCCCC; font-size: 10pt;")
+        
+        w_path = QWidget()
+        w_path.setStyleSheet("background-color: #1e1e1e; border: 1px solid #333; border-radius: 3px;")
+        l_path = QHBoxLayout(w_path)
+        l_path.setContentsMargins(4, 0, 0, 0)
+        l_path.setSpacing(2)
+        
+        val_logs = QLineEdit(str(log_file_path))
+        val_logs.setReadOnly(True)
+        val_logs.setStyleSheet("color: #AAAAAA; font-family: monospace; background: transparent; border: none;")
+        val_logs.setCursorPosition(0)
+        
+        btn_copy_logs = QPushButton("")
+        import PySide6.QtGui as qg
+        _src_dir = os.path.dirname(os.path.abspath(__file__))
+        btn_copy_logs.setIcon(qg.QIcon(os.path.join(_src_dir, "layout", "copy.png")))
+        btn_copy_logs.setToolTip(self.txt("btn_copy_path"))
+        btn_copy_logs.setStyleSheet("background: transparent; border: none; padding: 4px;")
+        btn_copy_logs.setCursor(Qt.PointingHandCursor)
+        def _copy_path():
+            import PySide6.QtGui as qg
+            qg.QGuiApplication.clipboard().setText(str(log_file_path))
+        btn_copy_logs.clicked.connect(_copy_path)
+        
+        l_path.addWidget(val_logs, stretch=1)
+        l_path.addWidget(btn_copy_logs)
+        
+        btn_logs = QPushButton(self.txt("btn_open_logs_dir"))
+        btn_logs.setObjectName("btn_ghost_sm")
+        btn_logs.setStyleSheet("padding: 4px 12px;")
+        btn_logs.setCursor(Qt.PointingHandCursor)
+        def _open_logs():
+            import os
+            try:
+                if self.engine.os_doc.is_win:
+                    os.startfile(log_dir)
+                else:
+                    import subprocess
+                    subprocess.Popen(['xdg-open', log_dir])
+            except: pass
+        btn_logs.clicked.connect(_open_logs)
+        l_logs.addWidget(lbl_logs)
+        l_logs.addWidget(w_path, stretch=1)
+        l_logs.addWidget(btn_logs)
+        l_support.addWidget(w_logs)
+
+        # Separator
+        sep_supp = QFrame()
+        sep_supp.setFrameShape(QFrame.HLine)
+        sep_supp.setStyleSheet("background-color: #222; max-height: 1px; border: none;")
+        l_support.addWidget(sep_supp)
+        l_support.addSpacing(6)
+
+        l_inputs = QVBoxLayout()
+        l_inputs.setSpacing(14)
+        
+        self.input_support_email = QLineEdit()
+        self.input_support_email.setPlaceholderText(self.txt("ph_support_email"))
+        l_inputs.addWidget(self.input_support_email)
+        
+        self.input_support_title = QLineEdit()
+        self.input_support_title.setPlaceholderText(self.txt("lbl_support_title"))
+        l_inputs.addWidget(self.input_support_title)
+
+        from PySide6.QtWidgets import QTextEdit
+        self.input_support_body = QTextEdit()
+        self.input_support_body.setPlaceholderText(self.txt("lbl_support_body"))
+        self.input_support_body.setMinimumHeight(150)
+        l_inputs.addWidget(self.input_support_body)
+
+        # Attachments list (above the bottom buttons)
+        self.w_attachments_list = QWidget()
+        self.l_attachments_list = QVBoxLayout(self.w_attachments_list)
+        self.l_attachments_list.setContentsMargins(0, 0, 0, 0)
+        self.l_attachments_list.setSpacing(4)
+        l_inputs.addWidget(self.w_attachments_list)
+
+        self.w_attachments_list.hide()
+
+        self.support_attachments = []
+        def _render_attachments():
+            while self.l_attachments_list.count():
+                child = self.l_attachments_list.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+                    
+            if not self.support_attachments:
+                self.w_attachments_list.hide()
+            else:
+                self.w_attachments_list.show()
+                for p in self.support_attachments:
+                    w_row = QWidget()
+                    w_row.setStyleSheet("background: #1a1a1a; border: 1px solid #333; border-radius: 3px;")
+                    l_row = QHBoxLayout(w_row)
+                    l_row.setContentsMargins(6, 2, 2, 2)
+                    
+                    lbl_name = QLabel(p)
+                    lbl_name.setStyleSheet("color: #aaa; border: none; font-size: 9pt;")
+                    
+                    btn_del = QPushButton("✕")
+                    btn_del.setObjectName("btn_ghost_sm")
+                    btn_del.setStyleSheet("color: #e74c3c; border: none; font-weight: bold; font-size: 11pt; padding: 2px;")
+                    btn_del.setCursor(Qt.PointingHandCursor)
+                    btn_del.setFixedSize(24, 24)
+                    
+                    def _del(checked=False, path=p):
+                        if path in self.support_attachments:
+                            self.support_attachments.remove(path)
+                            _render_attachments()
+                    btn_del.clicked.connect(_del)
+                    
+                    l_row.addWidget(lbl_name, stretch=1)
+                    l_row.addWidget(btn_del)
+                    self.l_attachments_list.addWidget(w_row)
+
+        l_support.addLayout(l_inputs)
+
+        # Bottom row: Attach | Stretch | Send
+        w_send = QWidget()
+        l_send = QHBoxLayout(w_send)
+        l_send.setContentsMargins(0, 0, 0, 0)
+        
+        btn_attach = QPushButton(self.txt("btn_attach_screenshots"))
+        btn_attach.setCursor(Qt.PointingHandCursor)
+        btn_attach.setStyleSheet(f"background-color: #2b2b2b; color: #ddd; padding: 6px 14px; border: 1px solid #444; border-radius: 4px;")
+        
+        def _attach():
+            from PySide6.QtWidgets import QFileDialog
+            files, _ = QFileDialog.getOpenFileNames(self, self.txt("btn_attach_screenshots"), "", "Images (*.png *.jpg *.jpeg)")
+            if files:
+                btn_attach.setText("Attached!")
+                btn_attach.setStyleSheet("background-color: #3b3b3b; color: #fff; padding: 6px 14px; border: 1px solid #555; border-radius: 4px;")
+                import PySide6.QtCore as qc
+                qc.QTimer.singleShot(1500, lambda: btn_attach.setText(self.txt("btn_attach_screenshots")))
+                qc.QTimer.singleShot(1500, lambda: btn_attach.setStyleSheet("background-color: #2b2b2b; color: #ddd; padding: 6px 14px; border: 1px solid #444; border-radius: 4px;"))
+                
+                for f in files:
+                    if f not in self.support_attachments:
+                        self.support_attachments.append(f)
+                _render_attachments()
+        btn_attach.clicked.connect(_attach)
+        l_send.addWidget(btn_attach)
+        
+        l_send.addStretch()
+        
+        btn_send = QPushButton(self.txt("btn_send_report"))
+        btn_send.setCursor(Qt.PointingHandCursor)
+        btn_send.setStyleSheet(f"background-color: {config.BTN_BG}; color: white; padding: 6px 16px; border: none; border-radius: 4px; font-weight: bold;")
+        
+        def _send_report():
+            title = self.input_support_title.text().strip()
+            body = self.input_support_body.toPlainText().strip()
+            email = self.input_support_email.text().strip()
+            if not title or not body:
+                return
+
+            btn_send.setEnabled(False)
+            btn_send.setText("...")
+
+            attachments = list(self.support_attachments)
+
+            class SendSignals(QObject):
+                finished = Signal(bool, str)
+            signals = SendSignals(self)
+
+            def _worker():
+                import os, zipfile, tempfile, requests
+                from osdoc import log_info, log_error
+                tmp_logs = ""
+                opened_files = []
+                try:
+                    fd, tmp_logs = tempfile.mkstemp(suffix='.zip', prefix='bw_logs_')
+                    os.close(fd)
+                    with zipfile.ZipFile(tmp_logs, 'w', zipfile.ZIP_DEFLATED) as zf:
+                        l_file = getattr(self.engine.os_doc, 'log_file', '')
+                        if l_file and os.path.exists(l_file):
+                            zf.write(l_file, os.path.basename(l_file))
+                        inst_dir = getattr(self.engine.os_doc, 'install_dir', '')
+                        if inst_dir:
+                            for cfile in ['user.json', 'settings.json', 'pref.json']:
+                                p = os.path.join(inst_dir, cfile)
+                                if os.path.exists(p):
+                                    zf.write(p, cfile)
+                        from PySide6.QtGui import QImage
+                        for i, p in enumerate(attachments):
+                            if os.path.exists(p):
+                                img = QImage(p)
+                                if not img.isNull():
+                                    if img.width() > 1920 or img.height() > 1080:
+                                        img = img.scaled(1920, 1080, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                                    fd_img, tmp_img = tempfile.mkstemp(suffix='.jpg')
+                                    os.close(fd_img)
+                                    img.save(tmp_img, "JPG", 70)
+                                    zf.write(tmp_img, f"screenshot_{i+1}.jpg")
+                                    try:
+                                        os.remove(tmp_img)
+                                    except:
+                                        pass
+                                else:
+                                    zf.write(p, f"screenshot_{i+1}{os.path.splitext(p)[1]}")
+                    
+                    files_payload = []
+                    import builtins
+                    f_logs = builtins.open(tmp_logs, 'rb')
+                    opened_files.append(f_logs)
+                    files_payload.append(('file', ('logs.zip', f_logs, 'application/zip')))
+
+                    data_payload = {
+                        'title': title,
+                        'body': body,
+                        'email': email,
+                        'version': getattr(config, 'VERSION', 'Unknown'),
+                        'content': f"@here\n>>> **Wersja:** {getattr(config, 'VERSION', 'Unknown')}\n**Email:** {email if email else 'Brak'}\n**Tytuł:** {title}\n\n**Treść:**\n{body}"
+                    }
+
+                    webhook_url = getattr(config, 'SUPPORT_WEBHOOK_URL', '')
+                    if not webhook_url:
+                        import time
+                        time.sleep(1)
+                        log_info("Webhook URL not defined in config.py, skipping actual HTTP POST.")
+                        return True, ""
+
+                    resp = requests.post(webhook_url, data=data_payload, files=files_payload, timeout=30)
+                    success = resp.status_code in (200, 201, 202, 204)
+                    if not success:
+                        log_error(f"Support report send failed: {resp.status_code} {resp.text}")
+                    return success, resp.text
+                except Exception as e:
+                    from osdoc import log_error
+                    log_error(f"Support report exception: {e}")
+                    return False, str(e)
+                finally:
+                    for f in opened_files:
+                        try: f.close()
+                        except: pass
+                    if tmp_logs and os.path.exists(tmp_logs):
+                        try: os.remove(tmp_logs)
+                        except: pass
+
+            def _thread_target():
+                success, msg = _worker()
+                signals.finished.emit(success, msg)
+
+            def _on_finished(success, msg):
+                btn_send.setEnabled(True)
+                if success:
+                    btn_send.setText(self.txt("msg_success"))
+                    btn_send.setStyleSheet(f"background-color: #1a7a3e; color: white; padding: 6px 16px; border: none; border-radius: 4px; font-weight: bold;")
+                    import PySide6.QtCore as qc
+                    qc.QTimer.singleShot(2000, lambda: btn_send.setText(self.txt("btn_send_report")))
+                    qc.QTimer.singleShot(2000, lambda: btn_send.setStyleSheet(f"background-color: {config.BTN_BG}; color: white; padding: 6px 16px; border: none; border-radius: 4px; font-weight: bold;"))
+                    
+                    self.input_support_title.clear()
+                    self.input_support_body.clear()
+                    self.input_support_email.clear()
+                    self.support_attachments.clear()
+                    _render_attachments()
+                else:
+                    btn_send.setText(self.txt("btn_send_report"))
+                    CustomMsgBox(self, self.txt("tab_support"), f"Error sending report: {msg[:100]}", self.txt("btn_ok")).exec()
+
+            signals.finished.connect(_on_finished)
+            import threading
+            threading.Thread(target=_thread_target, daemon=True).start()
+
+        btn_send.clicked.connect(_send_report)
+        l_send.addWidget(btn_send)
+        l_support.addWidget(w_send)
+
+        l_support.addStretch()
+        _add_page_to_stack(page_support)
 
         # FIX: Capture the exact UI state right after full construction
         # This prevents false-positive unsaved changes warnings when disk JSON
@@ -7272,12 +7601,17 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             font-size: {fs}pt;
             padding: 12px 14px;
         """)
-        px_size = int(fs * 1.33)
-        total_lh = px_size + lh
         preview_text = self.txt("lbl_font_preview")
-        self.lbl_preview.setText(
-            f'<div style="line-height: {total_lh}px; text-align: left;">{preview_text}</div>'
-        )
+        self.lbl_preview.setPlainText(preview_text)
+        from PySide6.QtGui import QTextCursor, QTextBlockFormat
+        cursor = self.lbl_preview.textCursor()
+        cursor.select(QTextCursor.Document)
+        fmt = QTextBlockFormat()
+        fmt.setLineHeight(float(lh), 4)
+        cursor.setBlockFormat(fmt)
+        cursor.setPosition(0)
+        self.lbl_preview.setTextCursor(cursor)
+        self.lbl_preview.verticalScrollBar().setValue(0)
 
     # ── Export / Import ───────────────────────────────────────────────────
 
@@ -7370,7 +7704,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             'view_mode':          view_mode,
             'editor_font_family': self._safe_get('combo_font', old_prefs.get('editor_font_family', 'Segoe UI'), 'currentText'),
             'editor_font_size':   self._safe_get('spin_fsize', old_prefs.get('editor_font_size', 12), 'value'),
-            'editor_line_height': self._safe_get('spin_lheight', old_prefs.get('editor_line_height', 12), 'value'),
+            'editor_line_height': self._safe_get('spin_lheight', old_prefs.get('editor_line_height', 7), 'value'),
             'sync_davinci_chapter': self._safe_get('chk_sync_davinci', old_prefs.get('sync_davinci_chapter', True), 'isChecked'),
             'timestamp_precise':    self._safe_get('tgl_timestamp_precise', old_prefs.get('timestamp_precise', config.DEFAULT_SETTINGS['timestamp_precise']), 'isChecked'),
             'auto_check_updates':      self._safe_get('tgl_auto_check_updates', old_prefs.get('auto_check_updates', True), 'isChecked'),
@@ -7447,7 +7781,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         self._safe_set('combo_view', self.txt("opt_segmented_blocks") if view_mode == 'segmented' else self.txt("opt_continuous_flow"), 'setText')
         self._safe_set('combo_font', state.get('editor_font_family', 'Segoe UI'), 'setText')
         self._safe_set('spin_fsize', state.get('editor_font_size', 12), 'setValue')
-        self._safe_set('spin_lheight', state.get('editor_line_height', 12), 'setValue')
+        self._safe_set('spin_lheight', state.get('editor_line_height', 7), 'setValue')
         
         self.current_custom_markers = state.get('custom_markers', [])
         try:
