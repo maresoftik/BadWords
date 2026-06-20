@@ -466,6 +466,41 @@ class CompareEngineV5:
                     continue
             
             # -------------------------------------------------
+            # KROK 0.5: MICRO-ERRORS (CUT-OFFS & STUTTERS) - FROM STANDALONE
+            # -------------------------------------------------
+            clean_t = super_clean(t_word)
+            if len(clean_t) > 0:
+                is_cutoff = False
+                if t_word.endswith('-'):
+                    is_cutoff = True
+                elif t_word.endswith('...'):
+                    # Check next 2 words in transcript
+                    for look_j in range(1, 3):
+                        if j + look_j < self.t_len:
+                            next_clean = super_clean(self.trans_tokens[j+look_j])
+                            if len(next_clean) > 0 and clean_t[0] == next_clean[0]:
+                                is_cutoff = True
+                                break
+                
+                if is_cutoff:
+                    # Traktujemy cutoff jako błąd wymowy (odrzut). Pomijamy go w transkrypcie.
+                    self.mark_range(j, j, 'bad')
+                    j += 1
+                    continue
+                
+                # Direct 1-word stutter (e.g. "to to")
+                if j + 1 < self.t_len:
+                    next_t_clean = super_clean(self.trans_tokens[j+1])
+                    if clean_t == next_t_clean:
+                        # Upewnijmy się, że w skrypcie nie ma celowego powtórzenia
+                        s_next_clean = super_clean(self.script_tokens[i+1]) if i + 1 < self.s_len else ""
+                        if super_clean(s_word) != s_next_clean:
+                            # To jest jąkanie w audio. Zaznaczamy pierwsze słowo jako repeat.
+                            self.mark_range(j, j, 'repeat')
+                            j += 1
+                            continue
+            
+            # -------------------------------------------------
             # KROK 1: SUPER EXACT (SUPER NORMALIZATION)
             # -------------------------------------------------
             if self.super_compare(s_word, t_word):
@@ -633,6 +668,12 @@ class CompareEngineV5:
                                 else:
                                     break
                             
+                            # v7.6 FIX: The new take (from final walk_j + 1 to j) is the GOOD take.
+                            # It should NOT be marked as 'repeat'. Unmark it!
+                            new_take_start = walk_j + 1
+                            if new_take_start <= j:
+                                self.mark_range(new_take_start, j, 'normal')
+                            
                             i = k + 1
                             self.history_map[k] = j 
                             self._add_trace(j, k)
@@ -748,10 +789,12 @@ class CompareEngineV5:
                 log_info(f"[Phase D] Skipping massive gap {local_end - local_start} words to prevent Blue Ocean.")
                 continue
                 
-            self.mark_range(local_start, local_end, 'repeat')
+            # v7.6 FIX: Removed self.mark_range(local_start, local_end, 'repeat') here.
+            # Phase C (Retake Logic) already colors the gaps properly. 
+            # Phase D was aggressively over-coloring the final "keeper" take!
             count_retakes += 1
 
-        log_info(f"--- PHASE D COMPLETED. Processed {count_retakes} genuine retake groups. ---")
+        log_info(f"--- PHASE D COMPLETED. Detected {count_retakes} genuine retake groups (Coloring handled by Phase C). ---")
 
 
 # ==========================================
