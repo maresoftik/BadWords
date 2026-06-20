@@ -270,8 +270,33 @@ class OSDoctor:
                 log_error(f"load_settings: corrupt settings.json, using defaults. ({e})")
                 loaded = {}
 
-        # Deep-merge: add any keys that were introduced in a new version
+        # Force migration for AI parameters for versions < 3.1.0
+        current_version = getattr(_cfg, "VERSION", "3.1.0")
+        saved_version = loaded.get("settings_version", "0.0.0")
+        
+        def version_tuple(v):
+            try:
+                clean_v = ''.join(c if c.isdigit() or c == '.' else '' for c in v)
+                return tuple(map(int, (clean_v.split(".") + ["0", "0"])[:3]))
+            except Exception:
+                return (0, 0, 0)
+                
         needs_save = False
+        
+        if loaded and version_tuple(saved_version) < version_tuple("3.1.0"):
+            log_info(f"Migrating AI settings from {saved_version} to {current_version} (forcing new optimized defaults)")
+            loaded["ai_compression_ratio_threshold"] = 2.4
+            loaded["ai_no_speech_threshold"] = 0.7
+            loaded["ai_logprob_threshold"] = -0.8
+            loaded["ai_initial_prompt"] = ""
+            loaded["settings_version"] = current_version
+            needs_save = True
+            
+        if loaded.get("settings_version") != current_version:
+            loaded["settings_version"] = current_version
+            needs_save = True
+
+        # Deep-merge: add any keys that were introduced in a new version
         for key, default_val in defaults.items():
             if key not in loaded:
                 loaded[key] = default_val
