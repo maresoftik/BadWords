@@ -5723,7 +5723,6 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self.category_list.addItem(self.txt("tab_custom_markers"))
             self.category_list.addItem(self.txt("tab_ai_engine"))
 
-            self.category_list.addItem(self.txt("tab_audio_sync"))
             self.category_list.addItem(self.txt("tab_telemetry"))
 
         self.category_list.setCurrentRow(0)
@@ -6456,6 +6455,67 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         _add_row(form_transcript, self.txt("lbl_display_mode"), self.combo_view,
                  self.txt("opt_segmented_blocks"), self.combo_view.setValue)
 
+        self._chunk_widgets = []
+        if not is_basic:
+            def _add_chunk_row(form, label_text, widget, default_val, setter_func, info_key):
+                container = QWidget()
+                row = QHBoxLayout(container)
+                row.setContentsMargins(0, 0, 0, 0)
+                row.setSpacing(6)
+                widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                row.addWidget(widget)
+                
+                btn_rev = QPushButton("↺")
+                btn_rev.setFixedSize(26, 26)
+                btn_rev.setCursor(Qt.PointingHandCursor)
+                btn_rev.setObjectName("btn_ghost_sm")
+                btn_rev.setToolTip(self.txt("tt_revert_to_default"))
+                def create_reset_handler(s_func, d_val):
+                    return lambda checked=False: s_func(d_val)
+                btn_rev.clicked.connect(create_reset_handler(setter_func, default_val))
+                row.addWidget(btn_rev)
+                
+                lbl_container = QWidget()
+                lbl_container.setMinimumWidth(200)
+                lbl_layout = QHBoxLayout(lbl_container)
+                lbl_layout.setContentsMargins(0, 0, 0, 0)
+                lbl_layout.setSpacing(6)
+                lbl = QLabel(label_text)
+                lbl.setWordWrap(True)
+                lbl_layout.addWidget(lbl)
+                lbl_layout.addWidget(self.parent()._create_info_icon(info_key))
+                lbl_layout.addStretch()
+                
+                form.addRow(lbl_container, container)
+                self.revert_funcs.append(lambda d=default_val, s=setter_func: s(d))
+                return lbl_container, container
+
+            self.spin_chunk_max = QSpinBox()
+            self.spin_chunk_max.setRange(5, 200)
+            self.spin_chunk_max.setValue(int(prefs.get('chunk_max_words', 30)))
+            lbl_max, cnt_max = _add_chunk_row(form_transcript, self.txt("lbl_chunk_max_words"), self.spin_chunk_max, 30, self.spin_chunk_max.setValue, "tt_chunk_max_words")
+            self._chunk_widgets.extend([lbl_max, cnt_max])
+
+            self.spin_chunk_look = QSpinBox()
+            self.spin_chunk_look.setRange(0, 20)
+            self.spin_chunk_look.setValue(int(prefs.get('chunk_lookahead', 3)))
+            lbl_look, cnt_look = _add_chunk_row(form_transcript, self.txt("lbl_chunk_lookahead"), self.spin_chunk_look, 3, self.spin_chunk_look.setValue, "tt_chunk_lookahead")
+            self._chunk_widgets.extend([lbl_look, cnt_look])
+
+            self.spin_chunk_min = QSpinBox()
+            self.spin_chunk_min.setRange(1, 50)
+            self.spin_chunk_min.setValue(int(prefs.get('chunk_min_chars', 7)))
+            lbl_min, cnt_min = _add_chunk_row(form_transcript, self.txt("lbl_chunk_min_chars"), self.spin_chunk_min, 7, self.spin_chunk_min.setValue, "tt_chunk_min_chars")
+            self._chunk_widgets.extend([lbl_min, cnt_min])
+
+            def _update_chunk_state(idx):
+                visible = (idx == 1)
+                for w in self._chunk_widgets:
+                    w.setVisible(visible)
+            
+            self.combo_view.valueChanged.connect(lambda v: _update_chunk_state(1 if v == self.txt("opt_segmented_blocks") else 0))
+            _update_chunk_state(1 if self.combo_view.currentText() == self.txt("opt_segmented_blocks") else 0)
+
         # Font family, size, line height
         from PySide6.QtGui import QFontDatabase
         self.combo_font = SearchableDropdown(QFontDatabase.families())
@@ -6554,38 +6614,6 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         self.spin_fsize.valueChanged.connect(self._update_preview)
         self.spin_lheight.valueChanged.connect(self._update_preview)
         self._update_preview()
-        # Chunking spinboxes — Advanced view only
-        if not is_basic:
-            form_chunk = QFormLayout()
-            form_chunk.setSpacing(14)
-            form_chunk.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-
-            self.spin_chunk_max = QSpinBox()
-            self.spin_chunk_max.setRange(5, 200)
-            self.spin_chunk_max.setValue(int(prefs.get('chunk_max_words', 30)))
-            _add_row(form_chunk, self.txt("lbl_chunk_max_words"), self.spin_chunk_max, 30, self.spin_chunk_max.setValue)
-
-            self.spin_chunk_look = QSpinBox()
-            self.spin_chunk_look.setRange(0, 20)
-            self.spin_chunk_look.setValue(int(prefs.get('chunk_lookahead', 3)))
-            _add_row(form_chunk, self.txt("lbl_chunk_lookahead"), self.spin_chunk_look, 3, self.spin_chunk_look.setValue)
-
-            self.spin_chunk_min = QSpinBox()
-            self.spin_chunk_min.setRange(1, 50)
-            self.spin_chunk_min.setValue(int(prefs.get('chunk_min_chars', 7)))
-            _add_row(form_chunk, self.txt("lbl_chunk_min_chars"), self.spin_chunk_min, 7, self.spin_chunk_min.setValue)
-
-            l_transcript.addLayout(form_chunk)
-
-            # Enable/disable chunk spinboxes based on view mode
-            def _update_chunk_state(idx):
-                enabled = (idx == 1)  # 1 = Segmented
-                self.spin_chunk_max.setEnabled(enabled)
-                self.spin_chunk_look.setEnabled(enabled)
-                self.spin_chunk_min.setEnabled(enabled)
-            self.combo_view.valueChanged.connect(lambda v: _update_chunk_state(1 if v == self.txt("opt_segmented_blocks") else 0))
-            _update_chunk_state(1 if self.combo_view.currentText() == self.txt("opt_segmented_blocks") else 0)
-
         l_transcript.addStretch()
         _add_page_to_stack(page_transcript, 1)
 
@@ -6770,42 +6798,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
 
 
         # ─────────────────────────────────────────────────────────────────
-        if not is_basic:
-            # PAGE 1 — AUDIO SYNC
-            # ─────────────────────────────────────────────────────────────────
-            page_sync = QWidget()
-            page_sync.setStyleSheet("background: transparent;")
-            l_sync = QVBoxLayout(page_sync)
-            l_sync.setContentsMargins(24, 20, 24, 16)
-            l_sync.setSpacing(0)
-            form_sync = QFormLayout()
-            form_sync.setSpacing(14)
-            form_sync.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-
-            self.spin_offset = QDoubleSpinBox()
-            self.spin_offset.setRange(-10, 10)
-            self.spin_offset.setSingleStep(0.1)
-            self.spin_offset.setValue(float(prefs.get('offset', self.DEFAULTS['offset'])))
-
-            self.spin_pad = QDoubleSpinBox()
-            self.spin_pad.setRange(0, 5)
-            self.spin_pad.setSingleStep(0.1)
-            self.spin_pad.setValue(float(prefs.get('pad', self.DEFAULTS['pad'])))
-
-            self.spin_snap = QDoubleSpinBox()
-            self.spin_snap.setRange(0, 5)
-            self.spin_snap.setSingleStep(0.1)
-            self.spin_snap.setValue(float(prefs.get('snap_max', prefs.get('snap_margin', self.DEFAULTS['snap_max']))))
-
-            _add_row(form_sync, self.txt("lbl_offset_s"),   self.spin_offset, self.DEFAULTS['offset'],   self.spin_offset.setValue)
-            _add_row(form_sync, self.txt("lbl_padding_s"),  self.spin_pad,    self.DEFAULTS['pad'],       self.spin_pad.setValue)
-            _add_row(form_sync, self.txt("lbl_snap_max_s"), self.spin_snap,   self.DEFAULTS['snap_max'],  self.spin_snap.setValue)
-
-            l_sync.addLayout(form_sync)
-            l_sync.addStretch()
-            _add_page_to_stack(page_sync)
-
-
+        # ─────────────────────────────────────────────────────────────────
 
         # ─────────────────────────────────────────────────────────────────
         # PAGE 8 — TELEMETRY
@@ -7369,9 +7362,6 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         state = {
             'gui_lang':           lang_code,
             'settings_view_mode': old_prefs.get('settings_view_mode', 'basic'),
-            'offset':             self._safe_get('spin_offset', old_prefs.get('offset', -0.05), 'value'),
-            'pad':                self._safe_get('spin_pad', old_prefs.get('pad', 0.05), 'value'),
-            'snap_max':           self._safe_get('spin_snap', old_prefs.get('snap_max', 0.25), 'value'),
             'app_icon':           icon_val,
             'shortcuts':          shortcuts_dict,
             'custom_markers':     getattr(self, 'current_custom_markers', old_prefs.get('custom_markers', [])),
@@ -7434,10 +7424,6 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
 
     def _restore_state_dict(self, state):
         is_basic = state.get('settings_view_mode', 'basic') == 'basic'
-        
-        self._safe_set('spin_offset', state.get('offset', 0.0), 'setValue')
-        self._safe_set('spin_pad', state.get('pad', 0.0), 'setValue')
-        self._safe_set('spin_snap', state.get('snap_max', 0.0), 'setValue')
         self._safe_set('chk_telemetry_opt_in', state.get('telemetry_opt_in', False), 'setChecked')
         self._safe_set('chk_telemetry_geo', state.get('telemetry_geo', False), 'setChecked')
         
@@ -7604,9 +7590,6 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
                 'shortcuts': f"{self.txt('tab_shortcuts')}",
                 'gui_lang': f"{self.txt('tab_general')}: {self.txt('lbl_language')}",
                 'app_icon': f"{self.txt('tab_general')}: {self.txt('lbl_app_icon')}",
-                'offset': f"{self.txt('tab_audio_sync')}: {self.txt('lbl_offset_s')}",
-                'pad': f"{self.txt('tab_audio_sync')}: {self.txt('lbl_padding_s')}",
-                'snap_max': f"{self.txt('tab_audio_sync')}: {self.txt('lbl_snap_max_s')}",
                 'view_mode': f"{self.txt('tab_transcript')}: {self.txt('lbl_display_mode')}",
                 'editor_font_family': f"{self.txt('tab_transcript')}: {self.txt('lbl_transcript_font')}",
                 'editor_font_size': f"{self.txt('tab_transcript')}: {self.txt('lbl_font_size_pt')}",
