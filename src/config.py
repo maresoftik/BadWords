@@ -54,7 +54,14 @@ def FS(size):
 # ==========================================
 # ANALYSIS PARAMETERS
 # ==========================================
-DEFAULT_BAD_WORDS = ["yyy", "eee", "aaa", "umm", "uh", "ah", "mhm"]
+DEFAULT_BAD_WORDS = [
+    "yyy", "eee", "aaa", "umm", "uh", "ah", "mhm",
+    "uhm", "hmm", "hm", "mm", "mmm",
+    "eh", "ehm", "uhh", "ahh", 
+    "yy", "ee", "aa", 
+    "ummm", "uhhh", "ahhh", "ehhh", "hmmm", "mmmm", 
+    "mhmm", "yhm", "yhy"
+]
 SIMILARITY_THRESHOLD = 0.45
 
 # Default filler/hesitation initial prompt for Whisper transcription
