@@ -153,9 +153,18 @@ def super_clean(text):
     """
     Funkcja pomocnicza 'SuperCompare' (część A).
     Usuwa WSZYSTKO co nie jest cyfrą lub literą (a-z, 0-9).
+    Zamienia słowne liczby 0-10 na cyfry.
     """
     if not text: return ""
-    return re.sub(r'[^a-z0-9]', '', text.lower())
+    cleaned = re.sub(r'[^a-z0-9]', '', text.lower())
+    NUMBER_WORDS = {
+        'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4', 
+        'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10',
+        'jeden': '1', 'dwa': '2', 'trzy': '3', 'cztery': '4', 
+        'pięć': '5', 'piec': '5', 'sześć': '6', 'szesc': '6', 'siedem': '7', 
+        'osiem': '8', 'dziewięć': '9', 'dziewiec': '9', 'dziesięć': '10', 'dziesiec': '10'
+    }
+    return NUMBER_WORDS.get(cleaned, cleaned)
 
 def tokenize_v5(text):
     """
@@ -835,26 +844,227 @@ def apply_debug_rgb_pattern(words_data):
     result.missing_indices = [] # No missing script in debug mode
     return result
 
+
+class ReverseCompareEngineV6(CompareEngineV5):
+    def __init__(self, script_text, words_data, algo_settings=None):
+        super().__init__(script_text, words_data, algo_settings)
+
+    def _phase_e_fill_dp_gaps(self, match_pairs):
+        """
+        PATCH v6.3: DP Gap Filler with Fuzzy Split Word Detection.
+        """
+        if not match_pairs:
+            return
+
+        match_pairs.sort(key=lambda x: x[0])
+        missing_set = set(self.missing_script_indices)
+        
+        def fill_gap(start_t, end_t, start_s, end_s):
+            t_g = end_t - start_t - 1
+            s_g = end_s - start_s - 1
+            
+            if t_g < 0 or s_g < 0:
+                return
+                
+            if t_g > 0 and s_g > 0:
+                if (t_g <= 4 and s_g <= 4) or (abs(t_g - s_g) <= 2 and max(t_g, s_g) <= 10):
+                    for t_idx in range(start_t + 1, end_t):
+                        self.mark_range(t_idx, t_idx, 'typo', is_auto=True)
+                    for s_idx in range(start_s + 1, end_s):
+                        if s_idx in missing_set:
+                            missing_set.remove(s_idx)
+                return
+
+            if s_g == 0 and 0 < t_g <= 6:
+                gap_audio_words = [super_clean(self.trans_tokens[idx]) for idx in range(start_t + 1, end_t)]
+                gap_str = "".join(gap_audio_words)
+                
+                prev_s_str = super_clean(self.script_tokens[start_s]) if start_s >= 0 else ""
+                next_s_str = super_clean(self.script_tokens[end_s]) if end_s < self.s_len else ""
+                
+                prev_t_str = super_clean(self.trans_tokens[start_t]) if start_t >= 0 else ""
+                next_t_str = super_clean(self.trans_tokens[end_t]) if end_t < self.t_len else ""
+                
+                # Check fuzzy equality
+                def is_match(combined, target):
+                    if not combined or not target: return False
+                    if combined in target or target in combined: return True
+                    return check_fuzzy(combined, target)
+                
+                if next_s_str and (is_match(gap_str, next_s_str) or is_match(gap_str + next_t_str, next_s_str) or is_match(next_t_str + gap_str, next_s_str)):
+                    for t_idx in range(start_t + 1, end_t):
+                        self.mark_range(t_idx, t_idx, 'typo', is_auto=True)
+                    self.mark_range(end_t, end_t, 'typo', is_auto=True)
+                    return
+                    
+                if prev_s_str and (is_match(gap_str, prev_s_str) or is_match(prev_t_str + gap_str, prev_s_str) or is_match(gap_str + prev_t_str, prev_s_str)):
+                    for t_idx in range(start_t + 1, end_t):
+                        self.mark_range(t_idx, t_idx, 'typo', is_auto=True)
+                    self.mark_range(start_t, start_t, 'typo', is_auto=True)
+                    return
+                    
+                if "plus" in gap_str and ("ctrl" in prev_s_str or "shift" in prev_s_str or "alt" in prev_s_str):
+                    for t_idx in range(start_t + 1, end_t):
+                        self.mark_range(t_idx, t_idx, 'typo', is_auto=True)
+                    return
+
+    def run(self):
+        log_info(f"--- STARTING DP ALIGNMENT V6 (Script: {self.s_len}, Trans: {self.t_len}) ---")
+        
+        for j in range(self.t_len):
+            self.mark_range(j, j, 'bad', is_auto=True)
+            
+        if self.s_len == 0 or self.t_len == 0:
+            result = AnalysisResult(self.words_data)
+            result.missing_indices = self.missing_script_indices
+            return result
+
+        # 1. Prepare normalized arrays
+        s_norm = [super_clean(w) for w in self.script_tokens]
+        t_norm = [super_clean(w) for w in self.trans_tokens]
+
+        s_rev = s_norm[::-1]
+        t_rev = t_norm[::-1]
+        
+        S = self.s_len
+        T = self.t_len
+        
+        dp = [[0.0] * (T + 1) for _ in range(S + 1)]
+        ptr = [[0] * (T + 1) for _ in range(S + 1)]
+        
+        for i in range(1, S + 1):
+            dp[i][0] = -5.0 * i
+            ptr[i][0] = 3
+        for j in range(1, T + 1):
+            dp[0][j] = -1.0 * j
+            ptr[0][j] = 2
+            
+        # Pre-compute fuzzy memoization to avoid millions of calls
+        fuzzy_memo = {}
+        def check_fuzzy(w1, w2):
+            if not w1 or not w2: return False
+            key = (w1, w2)
+            if key in fuzzy_memo: return fuzzy_memo[key]
+            
+            sim = calculate_similarity(w1, w2)
+            length = max(len(w1), len(w2))
+            min_length = min(len(w1), len(w2))
+            if length > 0 and (min_length / length) < 0.4:
+                fuzzy_memo[key] = False
+                return False
+                
+            thresh = self.fuzzy_thresh
+            if length < 4: thresh = min(thresh, THRESH_SHORT)
+            elif length <= 7: thresh = min(thresh, THRESH_MID)
+            
+            if sim >= thresh:
+                fuzzy_memo[key] = True
+                return True
+                
+            if sim >= 0.50:
+                ph1 = simplified_metaphone(w1)
+                ph2 = simplified_metaphone(w2)
+                if ph1 and ph2 and ph1 == ph2:
+                    fuzzy_memo[key] = True
+                    return True
+                    
+            fuzzy_memo[key] = False
+            return False
+            
+        import time
+        for i in range(1, S + 1):
+            if i % 25 == 0:
+                time.sleep(0.005)
+            
+            s_word = s_rev[i-1]
+            orig_s = self.script_tokens[S - i]
+            
+            for j in range(1, T + 1):
+                t_word = t_rev[j-1]
+                orig_t = self.trans_tokens[T - j]
+                
+                is_exact = (s_word == t_word and s_word != "") or self.super_compare(orig_s, orig_t)
+                is_fuzzy = False
+                
+                if not is_exact:
+                    is_fuzzy = check_fuzzy(s_word, t_word)
+                    
+                    # Split word lookahead (handles Whisper mutating 1 word into 2-4 words)
+                    if not is_exact and s_word != "":
+                        combo = t_word
+                        for k in range(1, 7):
+                            if j - 1 + k < T:
+                                combo = t_rev[j - 1 + k] + combo
+                                if super_clean(s_word) == super_clean(combo):
+                                    is_exact = True
+                                    break
+                                elif check_fuzzy(s_word, combo):
+                                    is_fuzzy = True
+                                    break
+                
+                score_exact = dp[i-1][j-1] + 10.0 if is_exact else -999999.0
+                score_fuzzy = dp[i-1][j-1] + 5.0 if is_fuzzy else -999999.0
+                score_skip_t = dp[i][j-1] - 0.5
+                score_skip_s = dp[i-1][j] - 5.0
+                
+                best_score = score_exact
+                best_ptr = 0
+                
+                if score_fuzzy > best_score:
+                    best_score = score_fuzzy
+                    best_ptr = 1
+                    
+                if score_skip_t >= best_score:
+                    best_score = score_skip_t
+                    best_ptr = 2
+                    
+                if score_skip_s > best_score:
+                    best_score = score_skip_s
+                    best_ptr = 3
+                    
+                dp[i][j] = best_score
+                ptr[i][j] = best_ptr
+
+        i = S
+        j = T
+        match_pairs = []
+        
+        while i > 0 or j > 0:
+            p = ptr[i][j]
+            if p == 0 or p == 1:
+                actual_s = S - i
+                actual_t = T - j
+                match_pairs.append((actual_t, actual_s, p))
+                i -= 1
+                j -= 1
+            elif p == 2:
+                j -= 1
+            elif p == 3:
+                actual_s = S - i
+                self.missing_script_indices.append(actual_s)
+                i -= 1
+
+        for t_idx, s_idx, p in match_pairs:
+            if p == 0:
+                self.mark_range(t_idx, t_idx, 'normal')
+            else:
+                self.mark_range(t_idx, t_idx, 'typo', is_auto=True)
+            self._add_trace(t_idx, s_idx)
+            
+        self.missing_script_indices.sort()
+        self._phase_d_smart_fragment_fill()
+        self._phase_e_fill_dp_gaps(match_pairs)
+
+        result = AnalysisResult(self.words_data)
+        result.missing_indices = self.missing_script_indices
+        return result
+
 def compare_script_to_transcript(script_text, words_data, algo_settings=None):
-    """
-    Wrapper dla silnika v5.0.
-    Includes Debug Interceptor for "$ R G B" code.
-    STAGE 9: Applies sanitize_hallucinations() before alignment to strip model loops.
-    STAGE 6A: Accepts algo_settings dict and passes it to CompareEngineV5.
-    """
-    
-    # --- DEBUG INTERCEPTOR ---
-    clean_code = script_text.strip().replace(" ", "").upper()
-    if clean_code == "$RGB":
-        return apply_debug_rgb_pattern(words_data)
-    # -------------------------
-
-    # STAGE 9: Strip hallucination loops from raw transcript before analysis
-    words_data = sanitize_hallucinations(words_data)
-
-    engine = CompareEngineV5(script_text, words_data, algo_settings=algo_settings)
-    # PATCH v6.4: ANTI-FREEZE
-    # Return single object (AnalysisResult) instead of tuple to keep engine.py happy.
+    _s = algo_settings or {}
+    if _s.get('algo_use_reverse_compare', False):
+        engine = ReverseCompareEngineV6(script_text, words_data, algo_settings=algo_settings)
+    else:
+        engine = CompareEngineV5(script_text, words_data, algo_settings=algo_settings)
     return engine.run()
 
 def absorb_inaudible_into_repeats(words_data):
@@ -1412,6 +1622,7 @@ def build_side_by_side_alignment(script_text, words_data):
     trans_line_map = [-1] * len(trans_tokens)
 
     if script_tokens and trans_tokens:
+        import time; time.sleep(0.01)
         sm = difflib.SequenceMatcher(
             None,
             [t["clean"] for t in script_tokens],

@@ -2124,7 +2124,7 @@ except Exception as e:
 
     def run_standalone_analysis(self, words_data, show_inaudible=True):
         prefs = self.os_doc.get_all_prefs()
-        algo_settings = {k: prefs[k] for k in ('algo_fuzzy_threshold', 'algo_retake_lookahead', 'algo_distance_penalty', 'algo_anchor_depth') if k in prefs}
+        algo_settings = {k: prefs[k] for k in ('algo_fuzzy_threshold', 'algo_retake_lookahead', 'algo_distance_penalty', 'algo_anchor_depth', 'algo_use_reverse_compare') if k in prefs}
         processed_words, count = algorithms.analyze_repeats(words_data, show_inaudible=show_inaudible, algo_settings=algo_settings)
         processed_words = algorithms.absorb_inaudible_into_repeats(processed_words)
         # FIX: Force hallucination status after manual re-analysis
@@ -2133,9 +2133,14 @@ except Exception as e:
 
     def run_comparison_analysis(self, script_text, words_data):
         prefs = self.os_doc.get_all_prefs()
-        algo_settings = {k: prefs[k] for k in ('algo_fuzzy_threshold', 'algo_retake_lookahead', 'algo_distance_penalty', 'algo_anchor_depth') if k in prefs}
+        algo_settings = {k: prefs[k] for k in ('algo_fuzzy_threshold', 'algo_retake_lookahead', 'algo_distance_penalty', 'algo_anchor_depth', 'algo_use_reverse_compare') if k in prefs}
         
+        # Multiprocessing in PyInstaller without freeze_support() causes a fatal crash.
+        # We must run it directly (which executes in the QThread established by gui.py).
+        # Since the DP loop has been heavily optimized and no longer has a band radius,
+        # it will compute so fast that the GIL lock will barely be noticeable.
         result_words = algorithms.compare_script_to_transcript(script_text, words_data, algo_settings=algo_settings)
+            
         final_words = algorithms.absorb_inaudible_into_repeats(result_words)
         # FIX: Force hallucination status after script comparison analysis
         final_words = self._enforce_hallucination_status(final_words)
