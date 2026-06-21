@@ -889,7 +889,7 @@ class ReverseCompareEngineV6(CompareEngineV5):
                 def is_match(combined, target):
                     if not combined or not target: return False
                     if combined in target or target in combined: return True
-                    return check_fuzzy(combined, target)
+                    return check_fuzzy_match(combined, target)
                 
                 if next_s_str and (is_match(gap_str, next_s_str) or is_match(gap_str + next_t_str, next_s_str) or is_match(next_t_str + gap_str, next_s_str)):
                     for t_idx in range(start_t + 1, end_t):
@@ -973,11 +973,13 @@ class ReverseCompareEngineV6(CompareEngineV5):
             
         import time
         for i in range(1, S + 1):
-            if i % 25 == 0:
-                time.sleep(0.005)
+            if i % 80 == 0:
+                time.sleep(0.003)
             
             s_word = s_rev[i-1]
             orig_s = self.script_tokens[S - i]
+            s_len = len(s_word)
+            s_first = s_word[0] if s_word else ''
             
             for j in range(1, T + 1):
                 t_word = t_rev[j-1]
@@ -990,17 +992,23 @@ class ReverseCompareEngineV6(CompareEngineV5):
                     is_fuzzy = check_fuzzy(s_word, t_word)
                     
                     # Split word lookahead (handles Whisper mutating 1 word into 2-4 words)
-                    if not is_exact and s_word != "":
-                        combo = t_word
-                        for k in range(1, 7):
-                            if j - 1 + k < T:
-                                combo = t_rev[j - 1 + k] + combo
-                                if super_clean(s_word) == super_clean(combo):
-                                    is_exact = True
-                                    break
-                                elif check_fuzzy(s_word, combo):
-                                    is_fuzzy = True
-                                    break
+                    # Early exit: only attempt if the transcript word could be a fragment
+                    # of the script word (shorter, and shares first or last char)
+                    if not is_exact and s_word != "" and len(t_word) < s_len and s_len > 3:
+                        t_first = t_word[0] if t_word else ''
+                        if t_first == s_first or t_word[-1:] == s_word[-1:] or t_word in s_word:
+                            combo = t_word
+                            for k in range(1, 7):
+                                if j - 1 + k < T:
+                                    combo = t_rev[j - 1 + k] + combo
+                                    if len(combo) > s_len + 3:
+                                        break  # combo already too long, no point continuing
+                                    if super_clean(s_word) == super_clean(combo):
+                                        is_exact = True
+                                        break
+                                    elif check_fuzzy(s_word, combo):
+                                        is_fuzzy = True
+                                        break
                 
                 score_exact = dp[i-1][j-1] + 10.0 if is_exact else -999999.0
                 score_fuzzy = dp[i-1][j-1] + 5.0 if is_fuzzy else -999999.0
@@ -1054,10 +1062,342 @@ class ReverseCompareEngineV6(CompareEngineV5):
         self.missing_script_indices.sort()
         self._phase_d_smart_fragment_fill()
         self._phase_e_fill_dp_gaps(match_pairs)
+        self._phase_f_retake_detection(match_pairs)
 
         result = AnalysisResult(self.words_data)
         result.missing_indices = self.missing_script_indices
         return result
+
+    def _phase_f_retake_detection(self, match_pairs):
+        """
+        PHASE F: Post-DP cleanup & retake detection.
+        
+        Four passes:
+        F.1 — Retake detection with bidirectional comparison & gap merging.
+        F.2 — Single-word red suppression.
+        F.3 — Split-word grouping (typo↔bad adjacency fix).
+        F.4 — Two-word red suppression (catch remaining short false positives).
+        """
+        if not match_pairs or self.t_len == 0:
+            return
+
+        # ── F.1: RETAKE DETECTION ──────────────────────────────────────────
+        matched_t_indices = set()
+        for t_idx, s_idx, p in match_pairs:
+            matched_t_indices.add(t_idx)
+        for k in range(self.t_len):
+            real_idx = self.trans_indices[k]
+            w = self.words_data[real_idx]
+            if w.get('status') in (None, 'normal', 'typo'):
+                matched_t_indices.add(k)
+
+        # Collect raw gaps
+        raw_gaps = []  # list of (gap_indices, good_before_indices, good_after_indices)
+        current_gap = []
+        for k in range(self.t_len):
+            if k not in matched_t_indices:
+                current_gap.append(k)
+            else:
+                if current_gap:
+                    # Collect previous good block (up to 25 words, walk backwards)
+                    good_before = []
+                    for j in range(current_gap[0] - 1, max(current_gap[0] - 26, -1), -1):
+                        if j >= 0 and j in matched_t_indices:
+                            good_before.append(j)
+                        else:
+                            break
+                    good_before.reverse()
+                    
+                    # Collect next good block (up to 25 words, skip small gaps)
+                    good_after = []
+                    skip_budget = 3  # allow skipping up to 3 non-matched words
+                    for j in range(k, min(k + 40, self.t_len)):
+                        if j in matched_t_indices:
+                            good_after.append(j)
+                            if len(good_after) >= 25:
+                                break
+                        else:
+                            skip_budget -= 1
+                            if skip_budget < 0:
+                                break
+                    raw_gaps.append((current_gap[:], good_before, good_after))
+                    current_gap = []
+        if current_gap:
+            good_before = []
+            for j in range(current_gap[0] - 1, max(current_gap[0] - 26, -1), -1):
+                if j >= 0 and j in matched_t_indices:
+                    good_before.append(j)
+                else:
+                    break
+            good_before.reverse()
+            raw_gaps.append((current_gap[:], good_before, []))
+
+        # Use raw gaps directly (no merging — merging caused false positives
+        # by absorbing correctly-matched bridge words into retake zones)
+        merged_gaps = raw_gaps
+
+        FWD_OVERLAP_THRESHOLD = 0.35
+        BWD_OVERLAP_THRESHOLD = 0.55  # backward must be stricter (common words inflate overlap)
+
+        def get_words_from_indices(indices):
+            """Extract cleaned words from transcript indices, keeping ALL words (no length filter)."""
+            words = []
+            for idx in indices:
+                if 0 <= idx < self.t_len:
+                    cleaned = super_clean(self.trans_tokens[idx])
+                    if cleaned:
+                        words.append(cleaned)
+            return words
+
+        def fuzzy_overlap_ratio(gap_words, ref_words):
+            """Calculate overlap with fuzzy matching: 'formats'≈'format' counts."""
+            if not gap_words or not ref_words:
+                return 0.0, 0
+            
+            ref_set = set(ref_words)
+            matched = 0
+            for gw in set(gap_words):
+                if len(gw) <= 1:
+                    continue  # skip single chars for overlap scoring
+                if gw in ref_set:
+                    matched += 1
+                else:
+                    # Fuzzy fallback: check if any ref word is similar
+                    for rw in ref_set:
+                        if len(rw) <= 1:
+                            continue
+                        if check_fuzzy_match(gw, rw):
+                            matched += 1
+                            break
+            
+            significant_gap = [gw for gw in set(gap_words) if len(gw) > 1]
+            ratio = matched / max(1, len(significant_gap))
+            return ratio, matched
+
+        def prefix_match_count(gap_words, ref_words):
+            """Count prefix matches (first N identical/fuzzy words)."""
+            pm = 0
+            for i in range(min(len(gap_words), len(ref_words))):
+                if gap_words[i] == ref_words[i] or check_fuzzy_match(gap_words[i], ref_words[i]):
+                    pm += 1
+                else:
+                    break
+            return pm
+
+        for gap_indices, good_before_idx, good_after_idx in merged_gaps:
+            if not gap_indices:
+                continue
+
+            gap_words = get_words_from_indices(gap_indices)
+            if not [w for w in gap_words if len(w) > 1]:
+                continue
+
+            # Compare against BOTH adjacent good blocks — take the better match
+            good_after_words = get_words_from_indices(good_after_idx)
+            good_before_words = get_words_from_indices(good_before_idx)
+
+            is_retake = False
+            significant_gap = [w for w in gap_words if len(w) > 1]
+            
+            # Forward comparison (gap vs next good block) — primary signal
+            if good_after_words:
+                fwd_ratio, fwd_matched = fuzzy_overlap_ratio(gap_words, good_after_words)
+                fwd_prefix = prefix_match_count(gap_words, good_after_words)
+                if fwd_ratio >= FWD_OVERLAP_THRESHOLD:
+                    is_retake = True
+                if fwd_prefix >= 2:
+                    is_retake = True
+                if len(significant_gap) <= 2 and fwd_prefix >= 1:
+                    is_retake = True
+
+            # Backward comparison (gap vs previous good block) — stricter
+            # Only for longer gaps (3+ words) to avoid false positives on short common phrases
+            if not is_retake and good_before_words and len(significant_gap) >= 3:
+                bwd_ratio, bwd_matched = fuzzy_overlap_ratio(gap_words, good_before_words)
+                bwd_prefix = prefix_match_count(gap_words, good_before_words)
+                # Require high overlap AND at least 4 unique matching words
+                if bwd_ratio >= BWD_OVERLAP_THRESHOLD and bwd_matched >= 4:
+                    is_retake = True
+                if bwd_prefix >= 3:
+                    is_retake = True
+
+            # Script comparison (gap vs script tokens) — catch retakes of 
+            # distant script lines that Whisper mangled (e.g. CIDR→Cedar)
+            if not is_retake and len(significant_gap) >= 5:
+                script_set = set(super_clean(t) for t in self.script_tokens if len(super_clean(t)) > 1)
+                script_ratio, script_matched = fuzzy_overlap_ratio(gap_words, list(script_set))
+                if script_ratio >= 0.50 and script_matched >= 4:
+                    is_retake = True
+
+            if is_retake:
+                for idx in gap_indices:
+                    if 0 <= idx < self.t_len:
+                        self.mark_range(idx, idx, 'repeat')
+                        real_idx = self.trans_indices[idx]
+                        self.words_data[real_idx]['is_retake'] = True
+
+        # ── F.2: SINGLE-WORD SUPPRESSION ─────────────────────────────────────
+        # Suppress isolated single 'bad' or 'repeat' words surrounded by
+        # normal content. Single-word gaps are almost always false positives.
+        # Also check temporal distance: if neighbor is >3s away, it's a
+        # separate speech segment and shouldn't count as a "neighbor".
+        for k in range(self.t_len):
+            real_idx = self.trans_indices[k]
+            w = self.words_data[real_idx]
+            if w.get('status') not in ('bad', 'repeat'):
+                continue
+            
+            cur_time = w.get('start', 0) or 0
+            prev_marked = False
+            next_marked = False
+            if k > 0:
+                prev_real = self.trans_indices[k - 1]
+                prev_w = self.words_data[prev_real]
+                if prev_w.get('status') in ('bad', 'repeat'):
+                    prev_time = prev_w.get('start', 0) or 0
+                    if abs(cur_time - prev_time) < 3.0:
+                        prev_marked = True
+            if k < self.t_len - 1:
+                next_real = self.trans_indices[k + 1]
+                next_w = self.words_data[next_real]
+                if next_w.get('status') in ('bad', 'repeat'):
+                    next_time = next_w.get('start', 0) or 0
+                    if abs(next_time - cur_time) < 3.0:
+                        next_marked = True
+            
+            if not prev_marked and not next_marked:
+                w['status'] = None
+                w['selected'] = False
+                w['is_auto'] = False
+                w['algo_status'] = None
+                w['is_retake'] = False
+
+        # ── F.2b: TYPO→REPEAT PROMOTION ───────────────────────────────────
+        # When the DP matches retake words as "typo" (fuzzy match to script),
+        # they appear as green/red instead of blue. If a typo/bad block is
+        # directly adjacent to a repeat block, promote it to repeat too.
+        for k in range(self.t_len):
+            real_idx = self.trans_indices[k]
+            w = self.words_data[real_idx]
+            cur_status = w.get('status')
+            if cur_status not in ('typo', 'bad'):
+                continue
+            
+            # Check if next non-same-status word is repeat
+            next_is_repeat = False
+            j = k + 1
+            while j < self.t_len:
+                nr = self.trans_indices[j]
+                ns = self.words_data[nr].get('status')
+                if ns == cur_status:
+                    j += 1
+                    continue
+                if ns == 'repeat':
+                    next_is_repeat = True
+                break
+            
+            # Check if prev non-same-status word is repeat
+            prev_is_repeat = False
+            j = k - 1
+            while j >= 0:
+                pr = self.trans_indices[j]
+                ps = self.words_data[pr].get('status')
+                if ps == cur_status:
+                    j -= 1
+                    continue
+                if ps == 'repeat':
+                    prev_is_repeat = True
+                break
+            
+            if next_is_repeat or prev_is_repeat:
+                self.mark_range(k, k, 'repeat')
+                self.words_data[real_idx]['is_retake'] = True
+
+        # ── F.3: SPLIT-WORD GROUPING (typo↔bad adjacency fix) ─────────────
+        k = 0
+        while k < self.t_len:
+            real_idx = self.trans_indices[k]
+            w = self.words_data[real_idx]
+            
+            if w.get('status') == 'typo':
+                bad_run = []
+                j = k + 1
+                while j < self.t_len and j - k <= 4:
+                    next_real = self.trans_indices[j]
+                    nw = self.words_data[next_real]
+                    if nw.get('status') == 'bad':
+                        bad_run.append(j)
+                        j += 1
+                    else:
+                        break
+                
+                if bad_run:
+                    after_ok = False
+                    after_j = bad_run[-1] + 1
+                    if after_j < self.t_len:
+                        after_real = self.trans_indices[after_j]
+                        after_status = self.words_data[after_real].get('status')
+                        if after_status in (None, 'normal', 'typo'):
+                            after_ok = True
+                    else:
+                        after_ok = True
+                    
+                    if after_ok:
+                        for bi in bad_run:
+                            self.mark_range(bi, bi, 'typo', is_auto=True)
+                        k = bad_run[-1] + 1
+                        continue
+            
+            if w.get('status') == 'bad':
+                bad_run = [k]
+                j = k + 1
+                while j < self.t_len and j - k <= 4:
+                    next_real = self.trans_indices[j]
+                    nw = self.words_data[next_real]
+                    if nw.get('status') == 'bad':
+                        bad_run.append(j)
+                        j += 1
+                    elif nw.get('status') == 'typo':
+                        for bi in bad_run:
+                            self.mark_range(bi, bi, 'typo', is_auto=True)
+                        break
+                    else:
+                        break
+            
+            k += 1
+
+        # ── F.4: TWO-WORD 'BAD' SUPPRESSION ──────────────────────────────
+        # Only suppress short 'bad' blocks. 'repeat' blocks are Phase F
+        # classifications and should be kept.
+        k = 0
+        while k < self.t_len:
+            real_idx = self.trans_indices[k]
+            w = self.words_data[real_idx]
+            if w.get('status') == 'bad':
+                # Count consecutive bad
+                run_start = k
+                run_end = k
+                while run_end + 1 < self.t_len:
+                    nr = self.trans_indices[run_end + 1]
+                    if self.words_data[nr].get('status') == 'bad':
+                        run_end += 1
+                    else:
+                        break
+                run_len = run_end - run_start + 1
+                if run_len <= 2:
+                    # Only suppress if BOTH neighbors are truly good content (not repeat)
+                    before_ok = (run_start == 0) or self.words_data[self.trans_indices[run_start - 1]].get('status') in (None, 'normal', 'typo')
+                    after_ok = (run_end >= self.t_len - 1) or self.words_data[self.trans_indices[run_end + 1]].get('status') in (None, 'normal', 'typo')
+                    if before_ok and after_ok:
+                        for ri in range(run_start, run_end + 1):
+                            rr = self.trans_indices[ri]
+                            self.words_data[rr]['status'] = None
+                            self.words_data[rr]['selected'] = False
+                            self.words_data[rr]['is_auto'] = False
+                            self.words_data[rr]['algo_status'] = None
+                k = run_end + 1
+            else:
+                k += 1
 
 def compare_script_to_transcript(script_text, words_data, algo_settings=None):
     _s = algo_settings or {}
