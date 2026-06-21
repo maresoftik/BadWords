@@ -1530,6 +1530,42 @@ except Exception as e:
         except Exception as e:
             log_error(f"Pipeline Critical Error: {traceback.format_exc()}")
             return None, None
+    def _extract_hotwords(self, text):
+        """
+        Silnik Regex (V14) do wyciagania hotwords.
+        Skupia sie na twardych anomaliach strukturalnych.
+        """
+        import re
+        hard_hotwords = set()
+        
+        # 1. Alfanumeryczne (np. 1080Ti, Mk8, P0300, enp3s0, i9-13900K, mRNA-1273)
+        hard_hotwords.update(re.findall(r'\b(?:[A-Za-z]+[0-9]+[A-Za-z0-9-]*|[0-9]+[A-Za-z]+[A-Za-z0-9-]*)\b', text))
+        
+        # 2. Ścieżki systemowe i URL (np. /etc/netplan, /usr/share/doc)
+        hard_hotwords.update(re.findall(r'(?<!\w)(?:/[a-zA-Z0-9_.-]+)+', text))
+        
+        # 3. Pliki, domeny, adresy (np. config.yaml, Node.js, example.com)
+        hard_hotwords.update(re.findall(r'\b[\w-]+\.(?:yaml|yml|txt|conf|exe|sh|json|xml|csv|log|py|js|cjs|cpp|h|com|org|net|io|pl)\b', text))
+        
+        # 4. CamelCase (np. AliExpress, TailwindCSS, MacBook)
+        hard_hotwords.update(re.findall(r'\b[A-Za-z]*[a-z][A-Z][A-Za-z]*\b', text))
+        
+        # 5. Zbitki znaków specjalnych (np. 50-cloud-init, ctrl+k, C++, C#)
+        hard_hotwords.update(re.findall(r'(?<![\w/])[a-zA-Z0-9_]+[-+*/#]+[a-zA-Z0-9_]*(?![\w/])', text))
+        
+        # 6. IPv4, IPv6 oraz adresy MAC
+        hard_hotwords.update(re.findall(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', text)) # IPv4
+        hard_hotwords.update(re.findall(r'\b(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}\b', text)) # IPv6
+        hard_hotwords.update(re.findall(r'\b(?:[0-9A-Fa-f]{2}[:-]){5}(?:[0-9A-Fa-f]{2})\b', text)) # MAC
+
+        final_list = []
+        for w in hard_hotwords:
+            w_clean = w.strip('.,!?"\'()[]{}:;')
+            if not w_clean.isnumeric() and len(w_clean) > 1:
+                final_list.append(w_clean)
+                
+        return sorted(list(set(final_list)), key=str.casefold)
+
 
     def _build_data_structure(self, json_data, silence_ranges, filler_words, fps, 
                               txt_inaudible="inaudible", time_scale_correction=1.0):
