@@ -1314,7 +1314,16 @@ class SearchOverlayWidget(QFrame):
             if '_rect' in w:
                 rect = w['_rect']
                 if hasattr(self.main_window, 'scroll_area'):
-                    self.main_window.scroll_area.ensureVisible(rect.x(), rect.y(), 0, 50)
+                    scroll_area = self.main_window.scroll_area
+                    # Podstawowe przesunięcie X jeśli schowane
+                    scroll_area.ensureVisible(rect.x(), rect.y(), 50, 50)
+                    
+                    # Wymuszenie idealnego wyśrodkowania w pionie
+                    vp_h = scroll_area.viewport().height()
+                    vbar = scroll_area.verticalScrollBar()
+                    target_y = rect.center().y()
+                    new_val = int(target_y - vp_h / 2)
+                    vbar.setValue(max(vbar.minimum(), min(new_val, vbar.maximum())))
                 
         canvas.update()
 
@@ -1711,7 +1720,7 @@ class TranscriptionCanvas(QWidget):
             w.pop('_ts_text', None)
             w.pop('_separator_y', None)
 
-        from PySide6.QtGui import QFontMetrics, QFont, QTextOption
+        from PySide6.QtGui import QFontMetrics, QFont, QTextOption, QTextBlockFormat, QTextCursor
         from PySide6.QtCore import Qt, QRect
         from PySide6.QtWidgets import QFrame, QTextEdit
         
@@ -1751,22 +1760,11 @@ class TranscriptionCanvas(QWidget):
         is_sbs = getattr(self, 'is_sbs_mode', False)
         
         if is_sbs and hasattr(self, 'sbs_rows'):
-            if not hasattr(self, 'sbs_editors'):
-                self.sbs_editors = []
-                
-            while len(self.sbs_editors) < len(self.sbs_rows):
-                ed = SBSTextEdit(self)
-                ed.setFrameShape(QFrame.NoFrame)
-                ed.setStyleSheet(f"background: {config.BG_COLOR}; color: {config.FG_COLOR}; border: none; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
-                text_opt = QTextOption()
-                text_opt.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-                ed.document().setDefaultTextOption(text_opt)
-                ed.textChanged.connect(self._on_sbs_editor_changed)
-                self.sbs_editors.append(ed)
-                
-            for ed in self.sbs_editors[len(self.sbs_rows):]:
-                ed.hide()
-                
+            # 0. CLEANUP (usuwamy śmieci z normalnego widoku, które powodowały problemy z separatorami)
+            for w in self.words_data:
+                for key in ['_rect', '_ts_rect', '_display_text', '_ts_text', '_separator_y']:
+                    w.pop(key, None)
+                    
             visible_words = []
             right_start_x = self.width() // 2 + 10
             max_w = self.width() - 20
@@ -1778,31 +1776,16 @@ class TranscriptionCanvas(QWidget):
             default_script_w = (self.width() // 2 - 20) - default_script_start_x
             
             for idx, row in enumerate(self.sbs_rows):
-                ed = self.sbs_editors[idx]
-                
-                new_text = row.get("script_text", "")
-                text_changed = getattr(ed, '_last_text', None) != new_text
-                if text_changed:
-                    ed.blockSignals(True)
-                    ed.setPlainText(new_text)
-                    ed.blockSignals(False)
-                    ed._last_text = new_text
+                script_text = row.get("script_text", "")
                 
                 trans_toks = row.get("transcript_tokens", [])
                 
                 # Separator line between rows
                 if y > 20:
                     y += 20
-                    # Store separator on the first transcript word if available
-                    if trans_toks:
-                        first_w = trans_toks[0].get("original_word")
-                        if first_w:
-                            first_w['_separator_y'] = y - 10
-                    else:
-                        # For rows without transcript tokens, create a virtual separator marker
-                        # by storing it on a dummy dict that we add to visible_words
-                        sep_marker = {'_separator_y': y - 10}
-                        visible_words.append(sep_marker)
+                    # Store separator on a virtual dictionary to avoid tainting real words
+                    sep_marker = {'_separator_y': y - 10}
+                    visible_words.append(sep_marker)
                             
                 row_start_y = y
                 x = max_w if is_rtl else right_start_x
@@ -1844,11 +1827,15 @@ class TranscriptionCanvas(QWidget):
                     curr_status = w.get("status")
                     
                     # Smart line break for repeat runs
-                    if curr_status == "repeat" and prev_status != "repeat" and x > right_start_x:
-                        x = right_start_x
+                    is_line_started = (x < max_w) if is_rtl else (x > right_start_x)
+                    if curr_status == "repeat" and prev_status != "repeat" and is_line_started:
+                        x = max_w if is_rtl else right_start_x
                         y += line_height
-                    elif prev_status == "repeat" and curr_status == "repeat" and force_newline and x > right_start_x:
-                        x = right_start_x
+                    elif prev_status == "repeat" and curr_status != "repeat" and is_line_started:
+                        x = max_w if is_rtl else right_start_x
+                        y += line_height
+                    elif prev_status == "repeat" and curr_status == "repeat" and force_newline and is_line_started:
+                        x = max_w if is_rtl else right_start_x
                         y += line_height
                     
                     is_inaudible = w.get('is_inaudible') or w.get('type') == 'inaudible'
@@ -1884,48 +1871,63 @@ class TranscriptionCanvas(QWidget):
                 transcript_h = (y + line_height) - row_start_y
                 
                 script_kind = row.get("script_kind")
-                if getattr(ed, '_last_kind', None) != script_kind:
-                    text_opt = QTextOption()
+                script_y = row_start_y
+                sx = script_start_x
+                
+                script_words = script_text.split()
+                for w_text in script_words:
+                    w_w = metrics.horizontalAdvance(w_text)
+                    if sx + w_w > script_start_x + default_script_w and sx > script_start_x:
+                        sx = script_start_x
+                        script_y += line_height
+                        
+                    visible_words.append({
+                        'text': w_text,
+                        '_display_text': w_text,
+                        '_rect': QRect(sx, script_y, w_w, metrics.height() + 4),
+                        'is_script_word': True,
+                        'script_kind': script_kind
+                    })
+                    sx += w_w + space_w
+                    
+                if script_words:
+                    script_y += line_height
+                
+                script_h = script_y - row_start_y
+                row_h = max(transcript_h, script_h, line_height)
+                
+                if script_kind in ("missing", "improv_gap"):
+                    bg_rect = QRect(script_start_x - 10, row_start_y, default_script_w + 20, row_h)
+                    visible_words.insert(0, {
+                        'is_script_bg': True,
+                        'script_kind': script_kind,
+                        '_rect': bg_rect
+                    })
+                    
                     if script_kind == "improv_gap":
-                        ed.setStyleSheet(f"background: #2b2020; color: #9a9a9a; border: 1px solid #553333; border-radius: 4px; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt; font-style: italic;")
-                        ed.setCustomPlaceholderText(self.main_window.txt("sbs_improvised_error"))
-                        text_opt.setAlignment(Qt.AlignCenter)
-                        ed.document().setDefaultTextOption(text_opt)
-                        ed.setAlignment(Qt.AlignCenter)
+                        placeholder = self.main_window.txt("sbs_improvised_error")
+                        pw = metrics.horizontalAdvance(placeholder)
+                        visible_words.append({
+                            'text': placeholder,
+                            '_display_text': placeholder,
+                            '_rect': QRect(script_start_x, row_start_y + (row_h - metrics.height()) // 2, pw, metrics.height() + 4),
+                            'is_script_placeholder': True,
+                            'script_kind': "improv_gap"
+                        })
                     elif script_kind == "missing":
-                        ed.setStyleSheet(f"background: #3a3218; color: {config.FG_COLOR}; border: 1px solid #5a4b22; border-radius: 4px; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
-                        ed.setCustomPlaceholderText(self.main_window.txt("sbs_unspoken"))
-                        text_opt.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-                        ed.document().setDefaultTextOption(text_opt)
-                        ed.setAlignment(Qt.AlignLeft)
-                    else:
-                        ed.setStyleSheet(f"background: {config.BG_COLOR}; color: {config.FG_COLOR}; border: none; padding: 4px 8px; font-family: {pref_family}; font-size: {pref_size}pt;")
-                        ed.setCustomPlaceholderText("")
-                        text_opt.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-                        ed.document().setDefaultTextOption(text_opt)
-                        ed.setAlignment(Qt.AlignLeft)
-                    ed._last_kind = script_kind
+                        placeholder = self.main_window.txt("sbs_skipped")
+                        pw = metrics.horizontalAdvance(placeholder)
+                        rx = right_start_x
+                        if is_rtl: rx = max_w - pw
+                        visible_words.append({
+                            'text': placeholder,
+                            '_display_text': placeholder,
+                            '_rect': QRect(rx, row_start_y + (row_h - metrics.height()) // 2, pw, metrics.height() + 4),
+                            'is_script_placeholder': True,
+                            'script_kind': "improv_gap"  # use same styling as improv gap (italic, gray)
+                        })
                 
-                # Dynamic height for script editor
-                # Force recompute if width or text changed
-                if getattr(ed, '_last_width', -1) != script_w or text_changed:
-                    ed.document().setTextWidth(max(1, script_w))
-                    ed._last_width = script_w
-                script_doc_h = ed.document().size().height() + 10
-                
-                # Use whichever is taller
-                row_h = max(transcript_h, script_doc_h, line_height)
-                
-                ed.setGeometry(script_start_x, row_start_y, max(1, script_w), row_h)
-                ed.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-                ed.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-                
-                ed.show()
-                y = row_start_y + row_h
-
-            # Hide any unused editors from previous longer layouts
-            for i in range(len(self.sbs_rows), len(self.sbs_editors)):
-                self.sbs_editors[i].hide()
+                y = row_start_y + row_h # No extra padding here, handled by next row's y += 20
 
             self._cached_visible_words = visible_words
             self.setMinimumHeight(y + line_height + 40)
@@ -2010,37 +2012,7 @@ class TranscriptionCanvas(QWidget):
             
         self.setMinimumHeight(y + line_height + 40)
 
-    def _on_sbs_editor_changed(self):
-        parts = []
-        for i in range(len(getattr(self, 'sbs_rows', []))):
-            if i < len(self.sbs_editors):
-                parts.append(self.sbs_editors[i].toPlainText())
-        new_script = "\n\n".join(parts)
-        
-        current_script = self.main_window.text_script.toPlainText()
-        if new_script == current_script:
-            return
-            
-        self.main_window.text_script.blockSignals(True)
-        self.main_window.text_script.setPlainText(new_script)
-        self.main_window.text_script.blockSignals(False)
-        
-        if hasattr(self, '_sbs_timer'):
-            self._sbs_timer.stop()
-        else:
-            self._sbs_timer = QTimer(self)
-            self._sbs_timer.setSingleShot(True)
-            self._sbs_timer.timeout.connect(self._realign_sbs)
-        self._sbs_timer.start(800)
 
-    def _realign_sbs(self):
-        if not getattr(self, 'is_sbs_mode', False): return
-        script_text = self.main_window.text_script.toPlainText()
-        import algorithms
-        rows = algorithms.build_side_by_side_alignment(script_text, self.words_data)
-        self.sbs_rows = rows
-        self._calculate_layout()
-        self.update()
 
     def paintEvent(self, event):
         from PySide6.QtGui import QPainter, QColor, QFont, QPen, QLinearGradient
@@ -2131,6 +2103,7 @@ class TranscriptionCanvas(QWidget):
         
         for w in visible_words:
             if '_rect' not in w: continue
+            if w.get('is_script_word') or w.get('is_script_bg') or w.get('is_script_placeholder'): continue
             
             # Pobieramy stan wyszukiwania i kolor tła dla danego słowa
             search_state = 'active' if w.get('_search_active') else ('match' if w.get('_search_match') else None)
@@ -2179,8 +2152,9 @@ class TranscriptionCanvas(QWidget):
             r0 = grp_words[0]['_rect']
             
             if is_active:
-                # Obliczamy prostokąt obejmujący całą szerokość płótna
+                # Obliczamy prostokąt obejmujący płótno (teraz zawsze na pełną szerokość, również w SBS)
                 active_line_rect = QRectF(0, r0.top() - 4, self.width(), r0.height() + 8)
+                    
                 # Dynamiczny kolor linii
                 if is_neutral:
                     active_line_color = QColor(255, 200, 50, 15) # Domyślny, delikatny żółty
@@ -2224,9 +2198,25 @@ class TranscriptionCanvas(QWidget):
             p.setBrush(active_line_color)
             p.drawRect(active_line_rect)
 
+        # PASS -1: Script Backgrounds
+        for w in visible_words:
+            if w.get('is_script_bg'):
+                script_kind = w.get('script_kind')
+                rect = w.get('_rect')
+                if rect:
+                    if script_kind == "improv_gap":
+                        bg = QColor(config.RESOLVE_COLORS_HEX.get('Red', "#ff0000"))
+                        p.setBrush(QColor(bg.red(), bg.green(), bg.blue(), 25))
+                    elif script_kind == "missing":
+                        p.setBrush(QColor(255, 200, 50, 20))
+                    else:
+                        continue
+                    p.drawRect(QRectF(0, rect.top() - 5, self.width(), rect.height() + 10))
+
+        p.setPen(Qt.NoPen)
         # PASS 1: Base Backgrounds
         for w in visible_words:
-            if '_rect' not in w: continue
+            if '_rect' not in w or w.get('is_script_word') or w.get('is_script_bg'): continue
             bg, _, _ = get_base_bg_fg(w)
             brush = w.get('_search_brush', bg)
             if brush:
@@ -2290,12 +2280,31 @@ class TranscriptionCanvas(QWidget):
         ts_color = QColor("#666666")
         
         for w in visible_words:
+            if w.get('is_script_bg'): continue
+            
             if '_ts_rect' in w:
                 p.setFont(ts_font)
                 p.setPen(ts_color)
                 p.drawText(w['_ts_rect'], Qt.AlignLeft | Qt.AlignVCenter, w.get('_ts_text', ''))
                 
             if '_rect' not in w: continue
+            
+            if w.get('is_script_word') or w.get('is_script_placeholder'):
+                font = QFont(active_font)
+                p.setFont(font)
+                
+                script_kind = w.get('script_kind')
+                if script_kind == "improv_gap":
+                    p.setPen(QColor("#9a9a9a"))
+                    font.setItalic(True)
+                    p.setFont(font)
+                elif script_kind == "missing":
+                    p.setPen(QColor(config.FG_COLOR))
+                else:
+                    p.setPen(QColor(config.FG_COLOR))
+                    
+                p.drawText(w['_rect'], Qt.AlignCenter, w.get('_display_text', w.get('text', '')))
+                continue
             
             _, fg, _ = get_base_bg_fg(w)
             final_fg = w.get('_search_fg', fg)
@@ -2326,6 +2335,9 @@ class TranscriptionCanvas(QWidget):
     def _handle_mouse(self, pos):
         visible_words = self._cached_visible_words
         for w in visible_words:
+            if w.get('is_script_word') or w.get('is_script_bg') or w.get('is_script_placeholder'):
+                continue
+                
             if '_rect' in w and w['_rect'].adjusted(-3, -1, 3, 1).contains(pos):
                 if w['id'] != self._last_dragged_id:
                     self._last_dragged_id = w['id']
@@ -2401,6 +2413,8 @@ class TranscriptionCanvas(QWidget):
         if event.button() == expected_btn:
             if active_mods == expected_mod:
                 for w in self._cached_visible_words:
+                    if w.get('is_script_word') or w.get('is_script_bg') or w.get('is_script_placeholder'):
+                        continue
                     if '_rect' in w and w['_rect'].adjusted(-3, -1, 3, 1).contains(event.pos()):
                         if hasattr(self.main_window, '_jump_playhead'):
                             self.main_window._jump_playhead(w.get('start', 0.0))
@@ -9089,10 +9103,12 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         if hasattr(self, 'sbs_loading_bar'):
             self.sbs_loading_bar.set_value(-1)
 
+        import algorithms
+        curr_script_hash = " ".join(algorithms.super_clean(w) for w in script_text.split() if algorithms.super_clean(w))
+
         def _finish_sbs(rows, updated_words):
             self.text_canvas.words_data = updated_words
-            self._sbs_last_script = script_text
-            self._sbs_cached_rows = rows
+            self._sbs_last_script_hash = curr_script_hash
             
             self.text_canvas.is_sbs_mode = True
             self.text_canvas.sbs_rows = rows
@@ -9100,19 +9116,24 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             self.text_canvas.update()
             
             self._sbs_thread = None
+            if hasattr(self, 'sbs_loading_bar'):
+                self.sbs_loading_bar.set_value(100)
             QTimer.singleShot(150, lambda: self.editor_view_stack.setCurrentIndex(0))
 
-        if getattr(self, '_sbs_last_script', None) == script_text and getattr(self, '_sbs_cached_rows', None) is not None:
+        if getattr(self, '_sbs_last_script_hash', None) == curr_script_hash:
+            # Core script words haven't changed! Skip the heavy comparison analysis.
             self.text_canvas.is_sbs_mode = True
-            self.text_canvas.sbs_rows = self._sbs_cached_rows
+            self.text_canvas.sbs_rows = algorithms.build_side_by_side_alignment(script_text, self.text_canvas.words_data)
             self.text_canvas._calculate_layout()
             self.text_canvas.update()
+            if hasattr(self, 'sbs_loading_bar'):
+                self.sbs_loading_bar.set_value(100)
             QTimer.singleShot(150, lambda: self.editor_view_stack.setCurrentIndex(0))
         else:
             from PySide6.QtCore import QThread, Signal as _Signal
             
             class _SBSThread(QThread):
-                finished_ok = _Signal(list, list)
+                finished_ok = _Signal(object, object)
                 
                 def __init__(self, engine, script_text, current_words):
                     super().__init__()
@@ -9133,9 +9154,6 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
     def _exit_side_by_side(self):
         self._is_sbs_active = False
         self.text_canvas.is_sbs_mode = False
-        if hasattr(self.text_canvas, 'sbs_editors'):
-            for ed in self.text_canvas.sbs_editors:
-                ed.hide()
         self.text_canvas._calculate_layout()
         self.text_canvas.update()
         

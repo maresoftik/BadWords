@@ -1620,6 +1620,12 @@ def _side_by_side_text_from_transcript_tokens(tokens):
     return "".join(parts).strip()
 
 
+_sbs_difflib_cache = {
+    "script_hash": None,
+    "trans_text_hash": None,
+    "base_map": None
+}
+
 def build_side_by_side_alignment(script_text, words_data):
     """
     Builds rows for the side-by-side compare view.
@@ -1631,6 +1637,9 @@ def build_side_by_side_alignment(script_text, words_data):
     4. Unmatched transcript tokens (improv) → own row with empty script.
     5. Unmatched script lines (unspoken) → own row with empty transcript.
     """
+    global _sbs_difflib_cache
+    import hashlib
+
     script_lines = _script_lines_for_side_by_side(script_text)
     trans_tokens = _tokens_from_words_data(words_data)
 
@@ -1649,26 +1658,55 @@ def build_side_by_side_alignment(script_text, words_data):
     if not script_tokens and not trans_tokens:
         return []
 
-    # Map each transcript token → script line (or -1 for unmatched/improv)
-    trans_line_map = [-1] * len(trans_tokens)
+    script_hash = hashlib.md5(" ".join(t["clean"] for t in script_tokens).encode('utf-8')).hexdigest()
+    trans_text_hash = hashlib.md5(" ".join(t["clean"] for t in trans_tokens).encode('utf-8')).hexdigest()
 
-    if script_tokens and trans_tokens:
-        import time; time.sleep(0.01)
-        sm = difflib.SequenceMatcher(
-            None,
-            [t["clean"] for t in script_tokens],
-            [t["clean"] for t in trans_tokens],
-            autojunk=False,
-        )
+    if _sbs_difflib_cache.get("script_hash") == script_hash and _sbs_difflib_cache.get("trans_text_hash") == trans_text_hash:
+        trans_line_map = list(_sbs_difflib_cache["base_map"])
+    else:
+        # Map each transcript token → script line (or -1 for unmatched/improv)
+        trans_line_map = [-1] * len(trans_tokens)
 
-        for tag, i1, i2, j1, j2 in sm.get_opcodes():
-            if tag in ("equal", "replace"):
-                for i in range(i2 - i1):
-                    si = i1 + i
-                    # Proportionally map script range to transcript range
-                    ti = j1 + int(i * (j2 - j1) / max(1, i2 - i1))
-                    if ti < j2:
-                        trans_line_map[ti] = script_tokens[si]["line"]
+        # Filter out bad and repeat tokens so they don't corrupt the difflib alignment!
+        # This prevents difflib from aggressively matching retakes to early script lines,
+        # which causes the final correct takes to "bleed" into later lines.
+        valid_trans_tokens = []
+        valid_indices = []
+        for ti, t in enumerate(trans_tokens):
+            if t.get("status") not in ("bad", "repeat"):
+                valid_trans_tokens.append(t)
+                valid_indices.append(ti)
+
+        if script_tokens and valid_trans_tokens:
+            sm = difflib.SequenceMatcher(
+                None,
+                [t["clean"] for t in script_tokens],
+                [t["clean"] for t in valid_trans_tokens],
+                autojunk=False,
+            )
+
+            for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                if tag == "equal":
+                    for i in range(j2 - j1):
+                        si = i1 + i
+                        if si < i2:
+                            trans_line_map[valid_indices[j1 + i]] = script_tokens[si]["line"]
+                elif tag == "replace":
+                    for i in range(j2 - j1):
+                        # Find corresponding script index by proportionality
+                        si = i1 + int(i * (i2 - i1) / max(1, j2 - j1))
+                        if si < i2:
+                            trans_line_map[valid_indices[j1 + i]] = script_tokens[si]["line"]
+
+        _sbs_difflib_cache["script_hash"] = script_hash
+        _sbs_difflib_cache["trans_text_hash"] = trans_text_hash
+        _sbs_difflib_cache["base_map"] = list(trans_line_map)
+
+    # Force 'bad' and 'repeat' words to -1, to isolate them and let backward-fill group retakes.
+    for ti in range(len(trans_tokens)):
+        status = trans_tokens[ti].get("status")
+        if status in ("bad", "repeat"):
+            trans_line_map[ti] = -1
 
     # Backward-fill MUST run first! 
     # In BadWords, false starts and retakes precede the final "good" matched take.
@@ -1676,6 +1714,8 @@ def build_side_by_side_alignment(script_text, words_data):
     last_matched_line = -1
     for ti in range(len(trans_tokens) - 1, -1, -1):
         tok = trans_tokens[ti]
+        if tok.get("status") == "bad":
+            continue
         if trans_line_map[ti] != -1:
             last_matched_line = trans_line_map[ti]
         elif tok.get("status") == "repeat" and last_matched_line != -1:
@@ -1686,6 +1726,8 @@ def build_side_by_side_alignment(script_text, words_data):
     last_matched_line = -1
     for ti in range(len(trans_tokens)):
         tok = trans_tokens[ti]
+        if tok.get("status") == "bad":
+            continue
         if trans_line_map[ti] != -1:
             last_matched_line = trans_line_map[ti]
         elif tok.get("status") == "repeat" and trans_line_map[ti] == -1 and last_matched_line != -1:
@@ -1696,6 +1738,8 @@ def build_side_by_side_alignment(script_text, words_data):
     # (like a stutter or filler word mid-retake) from splitting a row.
     for ti in range(len(trans_tokens)):
         if trans_line_map[ti] != -1:
+            continue
+        if trans_tokens[ti].get("status") == "bad":
             continue
         # Look backward and forward for nearest assigned lines
         prev_line = -1
@@ -1803,13 +1847,40 @@ def build_side_by_side_alignment(script_text, words_data):
     for row in final_rows:
         row.pop("_line_idx", None)
 
+    def is_clean_normal(r):
+        if r.get("script_kind") != "normal":
+            return False
+        for t in r.get("transcript_tokens", []):
+            if t.get("status") in ("bad", "repeat"):
+                return False
+        return True
+
     # Performance & UI fix: Merge consecutive "missing" rows into a single block.
-    # This prevents creating hundreds of QTextEdit widgets for long unspoken segments,
-    # which causes severe scroll lag. We join them with \n\n to maintain visual separation.
+    # We also merge consecutive "improv_gap" rows.
+    # Most importantly, we merge consecutive "clean" normal rows (no red/blue errors)
+    # into larger blocks to make error-filled lines stand out more visually.
     merged_rows = []
     for row in final_rows:
         if merged_rows and row["script_kind"] == "missing" and merged_rows[-1]["script_kind"] == "missing":
             merged_rows[-1]["script_text"] += "\n\n" + row["script_text"]
+        elif merged_rows and row["script_kind"] == "improv_gap" and merged_rows[-1]["script_kind"] == "improv_gap":
+            merged_rows[-1]["transcript_tokens"].extend(row["transcript_tokens"])
+            if merged_rows[-1]["transcript_text"] and row["transcript_text"]:
+                merged_rows[-1]["transcript_text"] += " " + row["transcript_text"]
+            else:
+                merged_rows[-1]["transcript_text"] += row["transcript_text"]
+        elif merged_rows and is_clean_normal(row) and is_clean_normal(merged_rows[-1]):
+            # Count how many script lines are already in the merged block
+            sentence_count = merged_rows[-1]["script_text"].count("\n\n") + 1
+            if sentence_count < 2:
+                merged_rows[-1]["script_text"] += "\n\n" + row["script_text"]
+                merged_rows[-1]["transcript_tokens"].extend(row["transcript_tokens"])
+                if merged_rows[-1]["transcript_text"] and row["transcript_text"]:
+                    merged_rows[-1]["transcript_text"] += " " + row["transcript_text"]
+                else:
+                    merged_rows[-1]["transcript_text"] += row["transcript_text"]
+            else:
+                merged_rows.append(row)
         else:
             merged_rows.append(row)
 
