@@ -2124,7 +2124,7 @@ except Exception as e:
 
     def run_standalone_analysis(self, words_data, show_inaudible=True):
         prefs = self.os_doc.get_all_prefs()
-        algo_settings = {k: prefs[k] for k in ('algo_fuzzy_threshold', 'algo_retake_lookahead', 'algo_distance_penalty', 'algo_anchor_depth', 'algo_use_reverse_compare') if k in prefs}
+        algo_settings = {k: prefs[k] for k in ('algo_fuzzy_threshold', 'algo_retake_lookahead', 'algo_distance_penalty', 'algo_anchor_depth') if k in prefs}
         processed_words, count = algorithms.analyze_repeats(words_data, show_inaudible=show_inaudible, algo_settings=algo_settings)
         processed_words = algorithms.absorb_inaudible_into_repeats(processed_words)
         # FIX: Force hallucination status after manual re-analysis
@@ -2133,12 +2133,10 @@ except Exception as e:
 
     def run_comparison_analysis(self, script_text, words_data):
         prefs = self.os_doc.get_all_prefs()
-        algo_settings = {k: prefs[k] for k in ('algo_fuzzy_threshold', 'algo_retake_lookahead', 'algo_distance_penalty', 'algo_anchor_depth', 'algo_use_reverse_compare') if k in prefs}
+        algo_settings = {k: prefs[k] for k in ('algo_fuzzy_threshold', 'algo_retake_lookahead', 'algo_distance_penalty', 'algo_anchor_depth') if k in prefs}
         
         # v9.6 FORCE HYBRID FUSION ENGINE (V6)
-        # The legacy CompareEngineV5 lacks Phase F suppression and relies on greedy anchor matching,
         # which causes aggressive false positive "blue" retakes. We force V6 to ensure accurate results.
-        algo_settings['algo_use_reverse_compare'] = True
         
         # Multiprocessing in PyInstaller without freeze_support() causes a fatal crash.
         # We must run it directly (which executes in the QThread established by gui.py).

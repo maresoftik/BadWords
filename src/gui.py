@@ -6519,14 +6519,6 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             lbl_min, cnt_min = _add_chunk_row(form_transcript, self.txt("lbl_chunk_min_chars"), self.spin_chunk_min, 7, self.spin_chunk_min.setValue, "tt_chunk_min_chars")
             self._chunk_widgets.extend([lbl_min, cnt_min])
 
-            self.chk_algo_reverse = ToggleSwitch()
-            self.chk_algo_reverse.setChecked(bool(prefs.get('algo_use_reverse_compare', False)), animated=False)
-            w_rev = QWidget()
-            l_rev = QHBoxLayout(w_rev)
-            l_rev.setContentsMargins(0, 0, 0, 0)
-            l_rev.addStretch()
-            l_rev.addWidget(self.chk_algo_reverse)
-            _add_row(form_transcript, self.txt("lbl_algo_use_reverse"), w_rev, False, lambda v: self.chk_algo_reverse.setChecked(v, animated=False))
 
 
             def _update_chunk_state(idx):
@@ -7734,7 +7726,6 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
                 'algo_retake_lookahead': self._safe_get('spin_lookahead', old_prefs.get('algo_retake_lookahead', 80), 'value'),
                 'algo_distance_penalty': self._safe_get('spin_penalty', old_prefs.get('algo_distance_penalty', 2.0), 'value'),
                 'algo_anchor_depth':     self._safe_get('spin_anchor', old_prefs.get('algo_anchor_depth', 3), 'value'),
-                'algo_use_reverse_compare': self._safe_get('chk_algo_reverse', old_prefs.get('algo_use_reverse_compare', False), 'isChecked'),
                 'ai_vad_filter':            self._safe_get('chk_vad_filter', old_prefs.get('ai_vad_filter', False), 'isChecked'),
                 'ai_beam_size':             self._safe_get('spin_beam_size', old_prefs.get('ai_beam_size', 1), 'value'),
                 'ai_temperature':           self._safe_get('spin_temperature', old_prefs.get('ai_temperature', 0.0), 'value'),
@@ -7752,7 +7743,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
                 'ai_repetition_penalty':    self._safe_get('spin_repetition_penalty', old_prefs.get('ai_repetition_penalty', 1.0), 'value'),
             })
         else:
-            advanced_keys = ["always_on_top", "device", "ai_compute_type", "ai_initial_prompt", "chunk_max_words", "chunk_lookahead", "chunk_min_chars", "algo_fuzzy_threshold", "algo_retake_lookahead", "algo_distance_penalty", "algo_anchor_depth", "algo_use_reverse_compare", "ai_vad_filter", "ai_beam_size", "ai_temperature", "ai_condition_on_prev", "ai_logprob_threshold", "ai_no_speech_threshold", "ai_patience", "ai_compression_ratio_threshold", "ai_no_repeat_ngram_size", "ai_regroup", "ai_suppress_silence", "ai_q_levels", "ai_k_size", "ai_length_penalty", "ai_repetition_penalty"]
+            advanced_keys = ["always_on_top", "device", "ai_compute_type", "ai_initial_prompt", "chunk_max_words", "chunk_lookahead", "chunk_min_chars", "algo_fuzzy_threshold", "algo_retake_lookahead", "algo_distance_penalty", "algo_anchor_depth", "ai_vad_filter", "ai_beam_size", "ai_temperature", "ai_condition_on_prev", "ai_logprob_threshold", "ai_no_speech_threshold", "ai_patience", "ai_compression_ratio_threshold", "ai_no_repeat_ngram_size", "ai_regroup", "ai_suppress_silence", "ai_q_levels", "ai_k_size", "ai_length_penalty", "ai_repetition_penalty"]
             for key in advanced_keys:
                 if key in old_prefs:
                     state[key] = old_prefs[key]
@@ -7843,7 +7834,6 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             self._safe_set('spin_lookahead', state.get('algo_retake_lookahead', 80), 'setValue')
             self._safe_set('spin_penalty', state.get('algo_distance_penalty', 2.0), 'setValue')
             self._safe_set('spin_anchor', state.get('algo_anchor_depth', 3), 'setValue')
-            self._safe_set('chk_algo_reverse', state.get('algo_use_reverse_compare', False), 'setChecked')
 
     def _apply_settings(self):
         old_prefs = self.engine.load_preferences() or {}

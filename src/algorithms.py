@@ -150,11 +150,11 @@ def read_pdf_text(path):
 def super_clean(text):
     """
     Funkcja pomocnicza 'SuperCompare' (część A).
-    Usuwa WSZYSTKO co nie jest cyfrą lub literą (a-z, 0-9).
+    Usuwa WSZYSTKO co nie jest cyfrą lub literą (włączając unicode).
     Zamienia słowne liczby 0-10 na cyfry.
     """
     if not text: return ""
-    cleaned = re.sub(r'[^a-z0-9]', '', text.lower())
+    cleaned = re.sub(r'[^\w]', '', text.lower()).replace('_', '')
     NUMBER_WORDS = {
         'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4', 
         'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10',
@@ -258,7 +258,7 @@ class AnalysisResult(list):
         super().__init__(iterable if iterable else [])
         self.missing_indices = []
 
-class CompareEngineV5:
+class CompareEngineBase:
     def __init__(self, script_text, words_data, algo_settings=None):
         # --- Stage 6A: Unpack algorithm tuning parameters with safe defaults ---
         _s = algo_settings or {}
@@ -409,342 +409,6 @@ class CompareEngineV5:
             count += 1
         return buffer, count
 
-    def run(self):
-        i = 0 # Script index
-        j = 0 # Trans index
-        
-        log_info(f"--- STARTING COMPARE v6.7 (Script: {self.s_len}, Trans: {self.t_len}) ---")
-
-        # -------------------------------------------------
-        # PHASE -1: HEAD SYNC (PATCH v6.6)
-        # Fixes startup crash when script has a long title/intro not present in audio.
-        # Finds where the transcript actually begins in the script.
-        # -------------------------------------------------
-        head_search_limit = min(self.s_len, 300) # Check first 300 words of script
-        trans_sample_len = min(self.t_len, 5)   # Use first 5 words of transcript
-        
-        if head_search_limit > 0 and trans_sample_len >= 3:
-            best_k = -1
-            # Try to find the first 3 words of transcript in the beginning of script
-            for k in range(head_search_limit):
-                match_count = 0
-                for m in range(3): # Check tri-gram
-                    if k + m < self.s_len and m < self.t_len:
-                        if self.super_compare(self.script_tokens[k+m], self.trans_tokens[m]):
-                            match_count += 1
-                        else:
-                            break
-                
-                if match_count == 3: # Found a solid anchor of 3 words
-                    best_k = k
-                    break
-            
-            if best_k > 0:
-                log_info(f"[Head Sync] Detected offset. Skipping first {best_k} script words (Title/Intro).")
-                # Mark skipped words as missing
-                for skipped in range(best_k):
-                    self.missing_script_indices.append(skipped)
-                i = best_k # Move script pointer to the actual start
-
-        while i < self.s_len and j < self.t_len:
-            s_word = self.script_tokens[i]
-            t_word = self.trans_tokens[j]
-            
-            # -------------------------------------------------
-            # KROK 0: AGRESYWNE LICZBY (NUMERIC GREED)
-            # -------------------------------------------------
-            if any(c.isdigit() for c in s_word):
-                s_digits, s_count = self.get_numeric_sequence_val(self.script_tokens, i)
-                t_digits, t_count = self.get_numeric_sequence_val(self.trans_tokens, j)
-                
-                if s_digits and t_digits and s_digits == t_digits:
-                    # MATCH!
-                    self.mark_range(j, j + t_count - 1, 'normal')
-                    
-                    # TraceMap Update for Numerics
-                    # Liczby z natury są sekwencją cyfr, więc traktujemy je jako pewne
-                    for offset in range(t_count):
-                         self.trace_map[j + offset] = i 
-
-                    # Historia (Legacy)
-                    for offset in range(s_count):
-                         if j + offset < j + t_count:
-                             self.history_map[i + offset] = j + offset
-                         else:
-                             self.history_map[i + offset] = j + t_count - 1
-
-                    i += s_count
-                    j += t_count
-                    continue
-            
-            # -------------------------------------------------
-            # KROK 0.5: MICRO-ERRORS (CUT-OFFS & STUTTERS) - FROM STANDALONE
-            # -------------------------------------------------
-            clean_t = super_clean(t_word)
-            if len(clean_t) > 0:
-                is_cutoff = False
-                if t_word.endswith('-'):
-                    is_cutoff = True
-                elif t_word.endswith('...'):
-                    # Check next 2 words in transcript
-                    for look_j in range(1, 3):
-                        if j + look_j < self.t_len:
-                            next_clean = super_clean(self.trans_tokens[j+look_j])
-                            if len(next_clean) > 0 and clean_t[0] == next_clean[0]:
-                                is_cutoff = True
-                                break
-                
-                if is_cutoff:
-                    # Traktujemy cutoff jako błąd wymowy (odrzut). Pomijamy go w transkrypcie.
-                    self.mark_range(j, j, 'bad')
-                    j += 1
-                    continue
-                
-                # Direct 1-word stutter (e.g. "to to")
-                if j + 1 < self.t_len:
-                    next_t_clean = super_clean(self.trans_tokens[j+1])
-                    if clean_t == next_t_clean:
-                        # Upewnijmy się, że w skrypcie nie ma celowego powtórzenia
-                        s_next_clean = super_clean(self.script_tokens[i+1]) if i + 1 < self.s_len else ""
-                        if super_clean(s_word) != s_next_clean:
-                            # To jest jąkanie w audio. Zaznaczamy pierwsze słowo jako repeat.
-                            self.mark_range(j, j, 'repeat')
-                            j += 1
-                            continue
-            
-            # -------------------------------------------------
-            # KROK 1: SUPER EXACT (SUPER NORMALIZATION)
-            # -------------------------------------------------
-            if self.super_compare(s_word, t_word):
-                self.mark_range(j, j, 'normal')
-                self.history_map[i] = j
-                self._add_trace(j, i) # v6.0 Secure Trace
-                i += 1
-                j += 1
-                continue
-            
-            # -------------------------------------------------
-            # KROK 2: TOLERANCJA (STOP WORDS)
-            # -------------------------------------------------
-            if s_word in STOP_WORDS and t_word in STOP_WORDS:
-                self.mark_range(j, j, 'normal')
-                self.history_map[i] = j
-                self._add_trace(j, i) # v6.0 Secure Trace
-                i += 1
-                j += 1
-                continue
-
-            # -------------------------------------------------
-            # KROK 3: INSERTION LOOKAHEAD (PATCH v5.9)
-            # -------------------------------------------------
-            if j + 1 < self.t_len and self.super_compare(s_word, self.trans_tokens[j+1]):
-                self.mark_range(j, j, 'bad')
-                j += 1
-                continue
-
-            # -------------------------------------------------
-            # KROK 4: FUZZY LOGIC (TYPO / MERGE / SPLIT)
-            # -------------------------------------------------
-            match_found = False
-            
-            # 1:1
-            if self._fuzzy_match(s_word, t_word):
-                self.mark_range(j, j, 'typo', is_auto=True)
-                self.history_map[i] = j
-                self._add_trace(j, i) # v6.0 Secure Trace
-                i += 1; j += 1
-                match_found = True
-            # Merge 1:2
-            elif j + 1 < self.t_len and self._fuzzy_match(s_word, t_word + self.trans_tokens[j+1]):
-                self.mark_range(j, j+1, 'typo', is_auto=True)
-                self.history_map[i] = j+1
-                self._add_trace(j, i)
-                self._add_trace(j+1, i)
-                i += 1; j += 2
-                match_found = True
-            # Split 2:1
-            elif i + 1 < self.s_len and self._fuzzy_match(s_word + self.script_tokens[i+1], t_word):
-                self.mark_range(j, j, 'typo', is_auto=True)
-                self.history_map[i] = j; self.history_map[i+1] = j
-                self._add_trace(j, i)
-                i += 2; j += 1
-                match_found = True
-                
-            if match_found:
-                continue
-
-            # -------------------------------------------------
-            # KROK 5: RESYNCHRONIZACJA (DELETION / RETAKE / BAD)
-            # -------------------------------------------------
-
-            # Krok 5a: DEEP YELLOW (Deletion Lookahead v6.2/6.3)
-            # Sprawdzamy do 4 słów w przód w skrypcie, czy coś pasuje do obecnego transkryptu
-            match_offset = -1
-            for offset in range(1, 5): # 1 to 4
-                if i + offset < self.s_len:
-                    s_cand = self.script_tokens[i+offset]
-                    # WARUNEK ROZSZERZONY: Exact LUB Fuzzy
-                    if self.super_compare(s_cand, t_word) or self._fuzzy_match(s_cand, t_word):
-                        match_offset = offset
-                        break
-            
-            if match_offset != -1:
-                # Znaleziono zgubę! Słowa od i do i+offset-1 są pominięte w audio (MISSING)
-                
-                # PATCH v6.3: Rejestracja brakujących indeksów ZANIM przesuniemy 'i'
-                for skipped in range(match_offset):
-                     self.missing_script_indices.append(i + skipped)
-
-                # Przesuwamy indeks skryptu 'i' do miejsca dopasowania.
-                i += match_offset
-                continue
-
-            # Krok 5b: Detekcja Retake (Fuzzy Anchor + Lookahead + Distance Penalty v6.5)
-            # Stage 6A: retake_lookahead from algo_settings controls the search window
-            found_retake = False
-            search_limit = max(0, i - self.retake_lookahead)
-            
-            for k in range(i - 1, search_limit - 1, -1):
-                s_candidate = self.script_tokens[k]
-                
-                # Weryfikacja kotwicy (Anchor Check)
-                is_anchor_candidate = self.super_compare(s_candidate, t_word)
-                if not is_anchor_candidate:
-                    # Always use standard _fuzzy_match for anchor candidates
-                    # v7.5: Removed the dangerous 0.40 threshold for < 4 chars that caused cascade failures
-                    is_anchor_candidate = self._fuzzy_match(s_candidate, t_word)
-                
-                if is_anchor_candidate:
-                    confirmed = False
-                    distance = i - k
-
-                    if distance <= 10:
-                        # BLISKO: Logika standardowa (Luźna)
-                        # 1. Długie, pewne słowo
-                        if len(super_clean(s_candidate)) > 6 and self.super_compare(s_candidate, t_word):
-                            confirmed = True
-                        # 2. Lookahead (Para słów)
-                        elif k + 1 < self.s_len and j + 1 < self.t_len:
-                            s_next = self.script_tokens[k+1]
-                            lookahead_j = j + 1
-                            # Check brief window for next match
-                            while lookahead_j < self.t_len and lookahead_j < j + 4:
-                                t_next = self.trans_tokens[lookahead_j]
-                                if self.super_compare(s_next, t_next) or self._fuzzy_match(s_next, t_next):
-                                    confirmed = True
-                                    break
-                                lookahead_j += 1
-                    else:
-                        # DALEKO (>10 słów): Logika ścisła (Trigram)
-                        # Wymagamy, aby pasowały 3 słowa z rzędu (k, k+1, k+2 -> j, j+1, j+2)
-                        # Minimalizuje ryzyko fałszywych dopasowań przy popularnych słowach
-                        if k + 2 < self.s_len and j + 2 < self.t_len:
-                            s_1 = self.script_tokens[k+1]
-                            s_2 = self.script_tokens[k+2]
-                            t_1 = self.trans_tokens[j+1]
-                            t_2 = self.trans_tokens[j+2]
-                            
-                            # Używamy super_compare (exact) dla pewności
-                            if self.super_compare(s_1, t_1) and self.super_compare(s_2, t_2):
-                                confirmed = True
-
-                    if confirmed:
-                        j_start = self.history_map.get(k)
-                        if j_start is not None and j_start < j:
-                            # v7.5 Anti Blue Ocean: Don't color massive gaps!
-                            if j - j_start > 40:
-                                continue
-                                
-                            self.mark_range(j_start, j, 'repeat')
-                            
-                            # --- v7.4 STRICT FIRST WORD RECOVERY ---
-                            # Only recover words safely, avoiding infinite fuzzy match loops.
-                            # We step backward strictly checking exact super_compare.
-                            walk_k = k - 1
-                            walk_j = j - 1
-                            walk_j_start = j_start - 1
-                            
-                            while walk_k >= 0 and walk_j >= 0 and walk_j_start >= 0:
-                                # Strict exact match only! No fuzzy match to prevent cascades.
-                                curr_match = self.super_compare(self.script_tokens[walk_k], self.trans_tokens[walk_j])
-                                prev_match = self.super_compare(self.script_tokens[walk_k], self.trans_tokens[walk_j_start])
-                                
-                                if curr_match and prev_match:
-                                    self._add_trace(walk_j, walk_k)
-                                    self._add_trace(walk_j_start, walk_k)
-                                    self.history_map[walk_k] = walk_j
-                                    
-                                    walk_k -= 1
-                                    walk_j -= 1
-                                    walk_j_start -= 1
-                                else:
-                                    break
-                            
-                            # v7.6 FIX: The new take (from final walk_j + 1 to j) is the GOOD take.
-                            # It should NOT be marked as 'repeat'. Unmark it!
-                            new_take_start = walk_j + 1
-                            if new_take_start <= j:
-                                self.mark_range(new_take_start, j, 'normal')
-                            
-                            i = k + 1
-                            self.history_map[k] = j 
-                            self._add_trace(j, k)
-                            j += 1
-                            found_retake = True
-                            break
-            
-            if found_retake:
-                continue
-
-            # Krok 5c: Błąd (Insertion / Bad) - Fallback
-            self.mark_range(j, j, 'bad')
-            j += 1
-            # i bez zmian
-        
-        # Cleanup
-        if j < self.t_len:
-            self.mark_range(j, self.t_len - 1, 'bad')
-
-        # PATCH v6.3: TAIL CATCH
-        # Jeśli skończyło się audio, a został skrypt -> Wszystko do końca jest MISSING
-        while i < self.s_len:
-            self.missing_script_indices.append(i)
-            i += 1
-            
-        log_info("--- PHASE C FINISHED. STARTING PHASE D: SMART FRAGMENT FILL ---")
-        self._phase_d_smart_fragment_fill()
-        
-        # --- PHASE E: COVERAGE VALIDATION (PATCH v6.7) ---
-        # The ultimate filter: if a script index was EVER matched (even as a retake or typo),
-        # it is NOT missing. We check history_map which records all successful matches.
-        
-        real_missing = []
-        for s_idx in self.missing_script_indices:
-            if s_idx not in self.history_map:
-                real_missing.append(s_idx)
-        
-        self.missing_script_indices = real_missing
-        log_info(f"[Phase E] Coverage Validation complete. Final missing count: {len(self.missing_script_indices)}")
-
-        # --- PHASE F: STOP WORD FILTER (v7.6) ---
-        # User request: "If an inserted word is just 'the' or 'a', don't mark it red, just ignore it."
-        for w in self.words_data:
-            if w.get('status') == 'bad' and not w.get('manual_status'):
-                clean = w.get('text', '').strip(".,?!:;\"'()[]{}").lower()
-                if clean in STOP_WORDS:
-                    w['status'] = None
-                    w['selected'] = False
-                    w['is_auto'] = False
-
-        # PATCH v6.4: ANTI-FREEZE HYBRID RETURN
-        # Zamiast krotki, zwracamy listę (AnalysisResult), która ma atrybut .missing_indices.
-        result = AnalysisResult(self.words_data)
-        result.missing_indices = self.missing_script_indices
-        return result
-
-    # ==========================================
-    # PHASE D: SMART FRAGMENT FILL (PATCH v5.8)
-    # ==========================================
     def _phase_d_smart_fragment_fill(self):
         """
         PATCH v5.8: Smart Fragment Fill.
@@ -848,7 +512,7 @@ def apply_debug_rgb_pattern(words_data):
     return result
 
 
-class ReverseCompareEngineV6(CompareEngineV5):
+class CompareEngine(CompareEngineBase):
     def __init__(self, script_text, words_data, algo_settings=None):
         super().__init__(script_text, words_data, algo_settings)
 
@@ -1223,7 +887,33 @@ class ReverseCompareEngineV6(CompareEngineV5):
             'en', 'il', 'je', 'ce', 'ne', 'pas', 'que', 'qui', 'sur',
             # Spanish
             'el', 'la', 'los', 'las', 'un', 'una', 'es', 'en', 'de',
-            'por', 'con', 'no', 'se', 'lo', 'que', 'del',
+            'por', 'con', 'no', 'se', 'lo', 'que', 'del', 'y', 'a', 'su',
+            'para', 'al', 'como', 'más', 'o', 'pero', 'sus', 'le', 'me', 'si',
+            # Italian
+            'il', 'lo', 'la', 'i', 'gli', 'le', 'un', 'uno', 'una', 'di', 'a', 
+            'da', 'in', 'con', 'su', 'per', 'tra', 'fra', 'e', 'o', 'ma', 'se', 
+            'che', 'non', 'mi', 'ti', 'ci', 'vi', 'si', 'del', 'al', 'dal', 'nel',
+            # Portuguese
+            'o', 'a', 'os', 'as', 'um', 'uma', 'e', 'do', 'da', 'dos', 'das', 
+            'de', 'em', 'no', 'na', 'nos', 'nas', 'por', 'com', 'para', 'se', 
+            'não', 'me', 'te', 'lhe', 'vos', 'que', 'ao', 'aos', 'pelo', 'pela',
+            # Dutch
+            'de', 'het', 'een', 'en', 'van', 'in', 'te', 'dat', 'die', 'is', 
+            'voor', 'met', 'op', 'zijn', 'niet', 'aan', 'er', 'ook', 'als', 
+            'om', 'dan', 'of', 'uit', 'door', 'over', 'maar',
+            # Russian
+            'и', 'в', 'не', 'на', 'я', 'быть', 'с', 'он', 'что', 'а', 'по', 
+            'это', 'она', 'этот', 'к', 'но', 'они', 'мы', 'как', 'из', 'у', 
+            'который', 'то', 'за', 'свой', 'весь', 'год', 'от', 'так', 'о', 
+            'для', 'ты', 'же', 'все', 'тот', 'мочь', 'вы', 'его',
+            # Japanese
+            'は', 'が', 'に', 'を', 'で', 'て', 'と', 'から', 'まで', 'より', 'も', 'の', 'です', 'ます', 'する', 'した',
+            # Chinese
+            '的', '了', '和', '是', '就', '都', '而', '及', '与', '着', '或', '一个', '没有', '我们', '你们', '他们', '她', '他', '它', '在', '也', '有',
+            # Korean
+            '은', '는', '이', '가', '에', '에서', '를', '을', '의', '로', '으로', '과', '와', '도', '고', '다', '입니다', '합니다',
+            # Arabic
+            'في', 'من', 'على', 'إلى', 'أن', 'عن', 'مع', 'هذا', 'التي', 'كان', 'لا', 'ما', 'أو', 'هذه', 'بعد', 'بين', 'هو', 'كل', 'وقد', 'كانت'
         }
         
         FWD_OVERLAP_THRESHOLD = 0.55   # v8.0: raised from 0.35 — need >50% content word overlap
@@ -1405,11 +1095,7 @@ class ReverseCompareEngineV6(CompareEngineV5):
         # F.4 was removed because it aggressively suppressed valid 2-word errors.
 
 def compare_script_to_transcript(script_text, words_data, algo_settings=None):
-    _s = algo_settings or {}
-    if _s.get('algo_use_reverse_compare', False):
-        engine = ReverseCompareEngineV6(script_text, words_data, algo_settings=algo_settings)
-    else:
-        engine = CompareEngineV5(script_text, words_data, algo_settings=algo_settings)
+    engine = CompareEngine(script_text, words_data, algo_settings=algo_settings)
     return engine.run()
 
 def absorb_inaudible_into_repeats(words_data):
