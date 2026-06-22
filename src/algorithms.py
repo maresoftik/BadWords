@@ -991,40 +991,47 @@ class ReverseCompareEngineV6(CompareEngineV5):
                 
                 is_exact = (s_word == t_word and s_word != "") or self.super_compare(orig_s, orig_t)
                 is_fuzzy = False
+                best_k_exact = 0
+                best_k_fuzzy = 0
                 
                 if not is_exact:
-                    is_fuzzy = check_fuzzy(s_word, t_word)
-                    
-                    # Split word lookahead (handles Whisper mutating 1 word into 2-4 words)
-                    # Early exit: only attempt if the transcript word could be a fragment
-                    # of the script word (shorter, and shares first or last char)
+                    if s_len > 3 and t_word in s_word:
+                        is_fuzzy = True
+                    elif check_fuzzy(s_word, t_word):
+                        is_fuzzy = True
+                        
+                    # Split-word combo lookahead: Whisper may split one technical
+                    # word into 2-7 fragments. Try combining consecutive transcript
+                    # words and matching the combo against the script word.
                     if not is_exact and s_word != "" and len(t_word) < s_len and s_len > 3:
                         t_first = t_word[0] if t_word else ''
                         if t_first == s_first or t_word[-1:] == s_word[-1:] or t_word in s_word:
                             combo = t_word
                             for k in range(1, 7):
                                 if j - 1 - k >= 0:
-                                    combo = combo + super_clean(t_rev[j - 1 - k])
+                                    combo = combo + t_rev[j - 1 - k]
                                     if len(combo) > s_len + 3:
-                                        break  # combo already too long, no point continuing
-                                    if super_clean(s_word) == super_clean(combo):
-                                        is_exact = True
                                         break
+                                    if s_word == combo:
+                                        is_exact = True
+                                        best_k_exact = k
+                                        break  # exact found, no need to keep looking
                                     elif check_fuzzy(s_word, combo):
                                         is_fuzzy = True
-                                        break
+                                        best_k_fuzzy = k
+                                        # Don't break — keep looking for exact
                 
-                score_exact = dp[i-1][j-1] + 10.0 if is_exact else -999999.0
-                score_fuzzy = dp[i-1][j-1] + 5.0 if is_fuzzy else -999999.0
+                score_exact = dp[i-1][j-1-best_k_exact] + 10.0 if is_exact else -999999.0
+                score_fuzzy = dp[i-1][j-1-best_k_fuzzy] + 5.0 if is_fuzzy else -999999.0
                 score_skip_t = dp[i][j-1] - 0.5
                 score_skip_s = dp[i-1][j] - 5.0
                 
                 best_score = score_exact
-                best_ptr = 0
+                best_ptr = 10 + best_k_exact if is_exact else 0
                 
                 if score_fuzzy > best_score:
                     best_score = score_fuzzy
-                    best_ptr = 1
+                    best_ptr = 20 + best_k_fuzzy
                     
                 if score_skip_t >= best_score:
                     best_score = score_skip_t
@@ -1042,6 +1049,15 @@ class ReverseCompareEngineV6(CompareEngineV5):
         match_pairs = []
         
         while i > 0 or j > 0:
+            if i == 0:
+                j -= 1
+                continue
+            if j == 0:
+                actual_s = S - i
+                self.missing_script_indices.append(actual_s)
+                i -= 1
+                continue
+                
             p = ptr[i][j]
             if p == 0 or p == 1:
                 actual_s = S - i
@@ -1049,6 +1065,22 @@ class ReverseCompareEngineV6(CompareEngineV5):
                 match_pairs.append((actual_t, actual_s, p))
                 i -= 1
                 j -= 1
+            elif p >= 10 and p < 20:
+                k = p - 10
+                actual_s = S - i
+                for step in range(k + 1):
+                    actual_t = T - (j - step)
+                    match_pairs.append((actual_t, actual_s, 0))
+                i -= 1
+                j -= (k + 1)
+            elif p >= 20:
+                k = p - 20
+                actual_s = S - i
+                for step in range(k + 1):
+                    actual_t = T - (j - step)
+                    match_pairs.append((actual_t, actual_s, 1))
+                i -= 1
+                j -= (k + 1)
             elif p == 2:
                 j -= 1
             elif p == 3:
@@ -1136,15 +1168,69 @@ class ReverseCompareEngineV6(CompareEngineV5):
             good_before.reverse()
             raw_gaps.append((current_gap[:], good_before, []))
 
-        # Use raw gaps directly (no merging — merging caused false positives
-        # by absorbing correctly-matched bridge words into retake zones)
-        merged_gaps = raw_gaps
+        # ── v8.1: SMART GAP MERGING ──────────────────────────────────────
+        # When the DP alignment "punctures" a retake by matching a single
+        # word in the middle (e.g. "underlay" or "w"), it splits what should
+        # be one retake into multiple tiny gaps. Merge adjacent gaps that
+        # are separated by ≤3 "bridge" words into a single combined gap.
+        merged_gaps = []
+        i = 0
+        while i < len(raw_gaps):
+            gap_indices, good_before, good_after = raw_gaps[i]
+            
+            # Try to merge with subsequent gaps
+            while i + 1 < len(raw_gaps):
+                next_gap_indices, _, next_good_after = raw_gaps[i + 1]
+                
+                # How many matched words between this gap's end and next gap's start?
+                if gap_indices and next_gap_indices:
+                    bridge_size = next_gap_indices[0] - gap_indices[-1] - 1
+                    if bridge_size <= 3:
+                        # Absorb bridge words and next gap into current gap
+                        bridge = list(range(gap_indices[-1] + 1, next_gap_indices[0]))
+                        gap_indices = gap_indices + bridge + next_gap_indices
+                        good_after = next_good_after
+                        i += 1
+                        continue
+                break
+            
+            merged_gaps.append((gap_indices, good_before, good_after))
+            i += 1
 
-        FWD_OVERLAP_THRESHOLD = 0.35
-        BWD_OVERLAP_THRESHOLD = 0.55  # backward must be stricter (common words inflate overlap)
+        # v8.1 MULTILINGUAL STOP WORDS
+        # These words appear so frequently in any language that they cannot
+        # serve as evidence of a retake. Extended with common Polish, German,
+        # Spanish, French, and other European language stop words.
+        STOP_SET = {
+            # English
+            'the', 'it', 'and', 'to', 'you', 'is', 'a', 'an', 'in', 'on',
+            'at', 'of', 'or', 'we', 'they', 'are', 'but', 'for', 'this',
+            'that', 'with', 'have', 'has', 'do', 'was', 'be', 'so', 'if',
+            'not', 'just', 'its', 'i', 'my', 'he', 'she', 'our', 'your',
+            'can', 'will', 'then', 'than', 'from', 'by', 'as', 'im',
+            'dont', 'what', 'how', 'when', 'where', 'all', 'no', 'yes',
+            # Polish
+            'w', 'i', 'na', 'z', 'do', 'o', 'nie', 'to', 'się', 'sie',
+            'je', 'jak', 'co', 'po', 'za', 'od', 'ze', 'jest', 'ale',
+            'ten', 'ta', 'te', 'ich', 'go', 'tam', 'tu', 'już', 'juz',
+            'tak', 'też', 'tez', 'czy', 'bo', 'mi', 'nam', 'was',
+            # German
+            'der', 'die', 'das', 'ein', 'und', 'ist', 'ich', 'du', 'er',
+            'wir', 'sie', 'es', 'mit', 'auf', 'fur', 'von', 'zu', 'den',
+            'dem', 'des', 'im', 'am', 'um', 'als', 'aus', 'bei',
+            # French
+            'le', 'la', 'les', 'un', 'une', 'et', 'est', 'de', 'du',
+            'en', 'il', 'je', 'ce', 'ne', 'pas', 'que', 'qui', 'sur',
+            # Spanish
+            'el', 'la', 'los', 'las', 'un', 'una', 'es', 'en', 'de',
+            'por', 'con', 'no', 'se', 'lo', 'que', 'del',
+        }
+        
+        FWD_OVERLAP_THRESHOLD = 0.55   # v8.0: raised from 0.35 — need >50% content word overlap
+        BWD_OVERLAP_THRESHOLD = 0.65   # v8.0: raised from 0.55
 
         def get_words_from_indices(indices):
-            """Extract cleaned words from transcript indices, keeping ALL words (no length filter)."""
+            """Extract cleaned words from transcript indices."""
             words = []
             for idx in indices:
                 if 0 <= idx < self.t_len:
@@ -1153,30 +1239,36 @@ class ReverseCompareEngineV6(CompareEngineV5):
                         words.append(cleaned)
             return words
 
-        def fuzzy_overlap_ratio(gap_words, ref_words):
-            """Calculate overlap with fuzzy matching: 'formats'≈'format' counts."""
+        def content_overlap_ratio(gap_words, ref_words):
+            """Calculate overlap EXCLUDING stop words. Returns (ratio, matched_content_count).
+            
+            Only non-stop-word matches count as evidence of a retake.
+            The ratio is computed over content words only."""
             if not gap_words or not ref_words:
                 return 0.0, 0
             
             ref_set = set(ref_words)
-            matched = 0
+            matched_content = 0
+            total_content = 0
+            
             for gw in set(gap_words):
                 if len(gw) <= 1:
-                    continue  # skip single chars for overlap scoring
+                    continue
+                if gw in STOP_SET:
+                    continue  # stop words don't count as evidence
+                total_content += 1
                 if gw in ref_set:
-                    matched += 1
+                    matched_content += 1
                 else:
-                    # Fuzzy fallback: check if any ref word is similar
                     for rw in ref_set:
-                        if len(rw) <= 1:
+                        if len(rw) <= 1 or rw in STOP_SET:
                             continue
                         if check_fuzzy_match(gw, rw):
-                            matched += 1
+                            matched_content += 1
                             break
             
-            significant_gap = [gw for gw in set(gap_words) if len(gw) > 1]
-            ratio = matched / max(1, len(significant_gap))
-            return ratio, matched
+            ratio = matched_content / max(1, total_content)
+            return ratio, matched_content
 
         def prefix_match_count(gap_words, ref_words):
             """Count prefix matches (first N identical/fuzzy words)."""
@@ -1193,49 +1285,79 @@ class ReverseCompareEngineV6(CompareEngineV5):
                 continue
 
             gap_words = get_words_from_indices(gap_indices)
-            if not [w for w in gap_words if len(w) > 1]:
-                continue
+            content_gap = [w for w in gap_words if len(w) > 1 and w not in STOP_SET]
+            if not content_gap:
+                continue  # gap is all stop words — can't determine retake
 
-            # Compare against BOTH adjacent good blocks — take the better match
             good_after_words = get_words_from_indices(good_after_idx)
             good_before_words = get_words_from_indices(good_before_idx)
 
             is_retake = False
-            significant_gap = [w for w in gap_words if len(w) > 1]
+            retake_start_pos = 0
             
             # Forward comparison (gap vs next good block) — primary signal
+            # This is the core retake check: does the gap repeat what comes next?
             if good_after_words:
-                fwd_ratio, fwd_matched = fuzzy_overlap_ratio(gap_words, good_after_words)
+                fwd_ratio, fwd_matched = content_overlap_ratio(gap_words, good_after_words)
                 fwd_prefix = prefix_match_count(gap_words, good_after_words)
-                if fwd_ratio >= FWD_OVERLAP_THRESHOLD:
+                unique_content = len(set(content_gap))
+                
+                # Strong evidence: high content-word overlap
+                if fwd_ratio >= FWD_OVERLAP_THRESHOLD and fwd_matched >= 2:
                     is_retake = True
-                if fwd_prefix >= 2:
+                # Very strong evidence: 3+ word prefix match (speaker restarted sentence)
+                if fwd_prefix >= 3:
                     is_retake = True
-                if len(significant_gap) <= 2 and fwd_prefix >= 1:
+                # Medium gaps with 2-word prefix: speaker started the same way
+                if fwd_prefix >= 2 and unique_content <= 6:
                     is_retake = True
+                # Very short gaps (1-2 unique content words): single content word match
+                if unique_content <= 2 and fwd_matched >= 1:
+                    is_retake = True
+                
+                # Subsequence detection: the gap may START with filler/false-start
+                # but END with a repeat of the after block. Scan the gap for a
+                # trailing window that overlaps strongly with the after block's start.
+                if not is_retake and len(gap_words) >= 4:
+                    after_content = [w for w in good_after_words if len(w) > 1 and w not in STOP_SET]
+                    if after_content:
+                        for start_pos in range(len(gap_words) - 2):
+                            tail = gap_words[start_pos:]
+                            tail_prefix = prefix_match_count(tail, good_after_words)
+                            if tail_prefix >= 2:
+                                is_retake = True
+                                retake_start_pos = start_pos
+                                break
+                            tail_content = [w for w in tail if len(w) > 1 and w not in STOP_SET]
+                            if len(tail_content) >= 2:
+                                tail_ratio, tail_matched = content_overlap_ratio(tail, good_after_words)
+                                if tail_ratio >= 0.60 and tail_matched >= 2:
+                                    # Enforce that the identified retake start actually relates to the next block
+                                    tail_first_matches = tail[0] in good_after_words or any(len(rw) > 1 and check_fuzzy_match(tail[0], rw) for rw in good_after_words)
+                                    if tail_first_matches:
+                                        is_retake = True
+                                        retake_start_pos = start_pos
+                                        break
 
-            # Backward comparison (gap vs previous good block) — stricter
-            # Only for longer gaps (3+ words) to avoid false positives on short common phrases
-            if not is_retake and good_before_words and len(significant_gap) >= 3:
-                bwd_ratio, bwd_matched = fuzzy_overlap_ratio(gap_words, good_before_words)
+            # Backward comparison (gap vs previous good block) — even stricter
+            # Only for longer gaps (4+ content words) to avoid false positives
+            if not is_retake and good_before_words and len(content_gap) >= 4:
+                bwd_ratio, bwd_matched = content_overlap_ratio(gap_words, good_before_words)
                 bwd_prefix = prefix_match_count(gap_words, good_before_words)
-                # Require high overlap AND at least 4 unique matching words
                 if bwd_ratio >= BWD_OVERLAP_THRESHOLD and bwd_matched >= 4:
                     is_retake = True
-                if bwd_prefix >= 3:
+                if bwd_prefix >= 4:
                     is_retake = True
 
-            # Script comparison (gap vs script tokens) — catch retakes of 
-            # distant script lines that Whisper mangled (e.g. CIDR→Cedar)
-            if not is_retake and len(significant_gap) >= 5:
-                script_set = set(super_clean(t) for t in self.script_tokens if len(super_clean(t)) > 1)
-                script_ratio, script_matched = fuzzy_overlap_ratio(gap_words, list(script_set))
-                if script_ratio >= 0.50 and script_matched >= 4:
-                    is_retake = True
+            # v8.0: Script comparison REMOVED.
+            # The old logic compared gap words against ALL script tokens.
+            # Since the transcript IS someone reading the script, nearly every
+            # gap matched the script at 50%+, causing everything to become retake.
+            # True retakes are caught by forward/backward comparison above.
 
             if is_retake:
-                for idx in gap_indices:
-                    if 0 <= idx < self.t_len:
+                for i_gap, idx in enumerate(gap_indices):
+                    if i_gap >= retake_start_pos and 0 <= idx < self.t_len:
                         self.mark_range(idx, idx, 'repeat')
                         real_idx = self.trans_indices[idx]
                         self.words_data[real_idx]['is_retake'] = True
@@ -1278,58 +1400,7 @@ class ReverseCompareEngineV6(CompareEngineV5):
 
         # F.2b (Typo->Repeat Promotion) was removed because it aggressively bled blue color into valid green/red segments.
 
-        # ── F.3: SPLIT-WORD GROUPING (typo↔bad adjacency fix) ─────────────
-        k = 0
-        while k < self.t_len:
-            real_idx = self.trans_indices[k]
-            w = self.words_data[real_idx]
-            
-            if w.get('status') == 'typo':
-                bad_run = []
-                j = k + 1
-                while j < self.t_len and j - k <= 4:
-                    next_real = self.trans_indices[j]
-                    nw = self.words_data[next_real]
-                    if nw.get('status') == 'bad':
-                        bad_run.append(j)
-                        j += 1
-                    else:
-                        break
-                
-                if bad_run:
-                    after_ok = False
-                    after_j = bad_run[-1] + 1
-                    if after_j < self.t_len:
-                        after_real = self.trans_indices[after_j]
-                        after_status = self.words_data[after_real].get('status')
-                        if after_status in (None, 'normal', 'typo'):
-                            after_ok = True
-                    else:
-                        after_ok = True
-                    
-                    if after_ok:
-                        for bi in bad_run:
-                            self.mark_range(bi, bi, 'typo', is_auto=True)
-                        k = bad_run[-1] + 1
-                        continue
-            
-            if w.get('status') == 'bad':
-                bad_run = [k]
-                j = k + 1
-                while j < self.t_len and j - k <= 4:
-                    next_real = self.trans_indices[j]
-                    nw = self.words_data[next_real]
-                    if nw.get('status') == 'bad':
-                        bad_run.append(j)
-                        j += 1
-                    elif nw.get('status') == 'typo':
-                        for bi in bad_run:
-                            self.mark_range(bi, bi, 'typo', is_auto=True)
-                        break
-                    else:
-                        break
-            
-            k += 1
+
 
         # F.4 was removed because it aggressively suppressed valid 2-word errors.
 
