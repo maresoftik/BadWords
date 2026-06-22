@@ -2135,6 +2135,11 @@ except Exception as e:
         prefs = self.os_doc.get_all_prefs()
         algo_settings = {k: prefs[k] for k in ('algo_fuzzy_threshold', 'algo_retake_lookahead', 'algo_distance_penalty', 'algo_anchor_depth', 'algo_use_reverse_compare') if k in prefs}
         
+        # v9.6 FORCE HYBRID FUSION ENGINE (V6)
+        # The legacy CompareEngineV5 lacks Phase F suppression and relies on greedy anchor matching,
+        # which causes aggressive false positive "blue" retakes. We force V6 to ensure accurate results.
+        algo_settings['algo_use_reverse_compare'] = True
+        
         # Multiprocessing in PyInstaller without freeze_support() causes a fatal crash.
         # We must run it directly (which executes in the QThread established by gui.py).
         # Since the DP loop has been heavily optimized and no longer has a band radius,

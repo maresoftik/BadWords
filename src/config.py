@@ -426,7 +426,7 @@ DEFAULT_SETTINGS = {
     "algo_retake_lookahead":  80,
     "algo_distance_penalty":  2.0,
     "algo_anchor_depth":      3,
-    "algo_use_reverse_compare": False,
+    "algo_use_reverse_compare": True,
     # ── Keyboard shortcuts ───────────────────────────────────────────────────
     "shortcuts": {
         "mark_red":        "1",

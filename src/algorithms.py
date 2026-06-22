@@ -46,11 +46,9 @@ from osdoc import log_info
 STOP_WORDS = {"a", "an", "the", "in", "on", "at", "to", "of", "i", "you", "he", "she", "it", "we", "they", "is", "are", "and", "or"}
 
 # Fuzzy Thresholds
-THRESH_LONG = 0.65   # v7.5 Relaxed from 0.70 to reduce false positives
-THRESH_MID = 0.55    # v7.5 Relaxed from 0.65
-THRESH_SHORT = 0.45  # v7.5 Relaxed from 0.50
-
-# ==========================================
+THRESH_LONG = 0.80   # Strict enough to prevent false positives for long words
+THRESH_MID = 0.75    # Strict enough for medium words
+THRESH_SHORT = 0.70  # Very strict for short words to prevent 'init' matching '.net'
 # 0. HALLUCINATION SANITIZER (STAGE 9)
 # ==========================================
 
@@ -283,11 +281,16 @@ class CompareEngineV5:
         self.trans_indices = [] 
         
         for idx, w in enumerate(words_data):
+            # v9.6 FULL CLEANUP: Reset all algorithm statuses before any processing.
+            # This prevents unmatched gaps from retaining 'repeat' status from previous standalone runs,
+            # which caused chain-reaction false positives in F.2b.
+            w['status'] = w.get('manual_status')
+            w['selected'] = bool(w['status'])
+            w['is_auto'] = False
+            w['is_retake'] = False
+            w['algo_status'] = None
+
             if w.get('type') == 'silence' or w.get('is_inaudible') or w.get('_is_hallucination'):
-                # v7.6 Clean up skipped words so they don't retain colors from previous runs
-                w['status'] = w.get('manual_status')
-                w['selected'] = bool(w['status'])
-                w['is_auto'] = False
                 continue
             
             # W transkrypcie Whisper daje czyste słowa, ale upewnijmy się
@@ -867,7 +870,8 @@ class ReverseCompareEngineV6(CompareEngineV5):
                 return
                 
             if t_g > 0 and s_g > 0:
-                if (t_g <= 4 and s_g <= 4) or (abs(t_g - s_g) <= 2 and max(t_g, s_g) <= 10):
+                # Be more lenient with typo grouping for split words. Whisper often splits 1 technical word into 3-4 words.
+                if max(t_g, s_g) <= 8 or (abs(t_g - s_g) <= 4 and max(t_g, s_g) <= 12):
                     for t_idx in range(start_t + 1, end_t):
                         self.mark_range(t_idx, t_idx, 'typo', is_auto=True)
                     for s_idx in range(start_s + 1, end_s):
@@ -999,8 +1003,8 @@ class ReverseCompareEngineV6(CompareEngineV5):
                         if t_first == s_first or t_word[-1:] == s_word[-1:] or t_word in s_word:
                             combo = t_word
                             for k in range(1, 7):
-                                if j - 1 + k < T:
-                                    combo = t_rev[j - 1 + k] + combo
+                                if j - 1 - k >= 0:
+                                    combo = combo + super_clean(t_rev[j - 1 - k])
                                     if len(combo) > s_len + 3:
                                         break  # combo already too long, no point continuing
                                     if super_clean(s_word) == super_clean(combo):
@@ -1272,46 +1276,7 @@ class ReverseCompareEngineV6(CompareEngineV5):
                 w['algo_status'] = None
                 w['is_retake'] = False
 
-        # ── F.2b: TYPO→REPEAT PROMOTION ───────────────────────────────────
-        # When the DP matches retake words as "typo" (fuzzy match to script),
-        # they appear as green/red instead of blue. If a typo/bad block is
-        # directly adjacent to a repeat block, promote it to repeat too.
-        for k in range(self.t_len):
-            real_idx = self.trans_indices[k]
-            w = self.words_data[real_idx]
-            cur_status = w.get('status')
-            if cur_status not in ('typo', 'bad'):
-                continue
-            
-            # Check if next non-same-status word is repeat
-            next_is_repeat = False
-            j = k + 1
-            while j < self.t_len:
-                nr = self.trans_indices[j]
-                ns = self.words_data[nr].get('status')
-                if ns == cur_status:
-                    j += 1
-                    continue
-                if ns == 'repeat':
-                    next_is_repeat = True
-                break
-            
-            # Check if prev non-same-status word is repeat
-            prev_is_repeat = False
-            j = k - 1
-            while j >= 0:
-                pr = self.trans_indices[j]
-                ps = self.words_data[pr].get('status')
-                if ps == cur_status:
-                    j -= 1
-                    continue
-                if ps == 'repeat':
-                    prev_is_repeat = True
-                break
-            
-            if next_is_repeat or prev_is_repeat:
-                self.mark_range(k, k, 'repeat')
-                self.words_data[real_idx]['is_retake'] = True
+        # F.2b (Typo->Repeat Promotion) was removed because it aggressively bled blue color into valid green/red segments.
 
         # ── F.3: SPLIT-WORD GROUPING (typo↔bad adjacency fix) ─────────────
         k = 0
@@ -1366,38 +1331,7 @@ class ReverseCompareEngineV6(CompareEngineV5):
             
             k += 1
 
-        # ── F.4: TWO-WORD 'BAD' SUPPRESSION ──────────────────────────────
-        # Only suppress short 'bad' blocks. 'repeat' blocks are Phase F
-        # classifications and should be kept.
-        k = 0
-        while k < self.t_len:
-            real_idx = self.trans_indices[k]
-            w = self.words_data[real_idx]
-            if w.get('status') == 'bad':
-                # Count consecutive bad
-                run_start = k
-                run_end = k
-                while run_end + 1 < self.t_len:
-                    nr = self.trans_indices[run_end + 1]
-                    if self.words_data[nr].get('status') == 'bad':
-                        run_end += 1
-                    else:
-                        break
-                run_len = run_end - run_start + 1
-                if run_len <= 2:
-                    # Only suppress if BOTH neighbors are truly good content (not repeat)
-                    before_ok = (run_start == 0) or self.words_data[self.trans_indices[run_start - 1]].get('status') in (None, 'normal', 'typo')
-                    after_ok = (run_end >= self.t_len - 1) or self.words_data[self.trans_indices[run_end + 1]].get('status') in (None, 'normal', 'typo')
-                    if before_ok and after_ok:
-                        for ri in range(run_start, run_end + 1):
-                            rr = self.trans_indices[ri]
-                            self.words_data[rr]['status'] = None
-                            self.words_data[rr]['selected'] = False
-                            self.words_data[rr]['is_auto'] = False
-                            self.words_data[rr]['algo_status'] = None
-                k = run_end + 1
-            else:
-                k += 1
+        # F.4 was removed because it aggressively suppressed valid 2-word errors.
 
 def compare_script_to_transcript(script_text, words_data, algo_settings=None):
     _s = algo_settings or {}
