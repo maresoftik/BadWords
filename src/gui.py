@@ -2382,6 +2382,7 @@ class TranscriptionCanvas(QWidget):
 
 
     def mousePressEvent(self, event):
+        from PySide6.QtGui import QGuiApplication
         prefs = getattr(self.main_window.engine, 'load_preferences', lambda: {})() or {}
         shortcuts = prefs.get('shortcuts', getattr(config, 'DEFAULT_SETTINGS', {}).get('shortcuts', {}))
         jump_opt = shortcuts.get('jump_to_word', 'opt_ctrl_rmb')
@@ -2393,8 +2394,12 @@ class TranscriptionCanvas(QWidget):
         elif 'shift' in jump_opt: expected_mod = Qt.KeyboardModifier.ShiftModifier
         else: expected_mod = Qt.KeyboardModifier.ControlModifier
         
+        # Querying global keyboard state prevents Qt's stuck modifier bug (especially after Alt-Tab)
+        global_mods = QGuiApplication.queryKeyboardModifiers()
+        active_mods = global_mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.ShiftModifier)
+        
         if event.button() == expected_btn:
-            if event.modifiers() == expected_mod:
+            if active_mods == expected_mod:
                 for w in self._cached_visible_words:
                     if '_rect' in w and w['_rect'].adjusted(-3, -1, 3, 1).contains(event.pos()):
                         if hasattr(self.main_window, '_jump_playhead'):
@@ -2402,16 +2407,18 @@ class TranscriptionCanvas(QWidget):
                 return
 
         if event.button() == Qt.LeftButton:
+            self._is_painting = True
             self._last_dragged_id = -1
             self._current_undo_action = {"type": "paint", "changes": {}}
             self._handle_mouse(event.pos())
 
     def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton:
+        if event.buttons() & Qt.LeftButton and getattr(self, '_is_painting', False):
             self._handle_mouse(event.pos())
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            self._is_painting = False
             action = getattr(self, '_current_undo_action', None)
             if action and action.get('changes'):
                 if hasattr(self.main_window, 'undo_manager'):
