@@ -5462,9 +5462,8 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
         self.engine = engine
         self.setWindowTitle(self.txt("tool_settings"))
         self.frameless_init(is_popup=True)
-        self.setWindowFlags(self.windowFlags() | Qt.Dialog)
-        self.setMinimumSize(710, 550)
-        self.resize(750, 580)
+        self.setWindowFlags(self.windowFlags() | Qt.Tool | Qt.Dialog)
+        self.setFixedSize(750, 580)
 
         prefs = self.engine.load_preferences() or {}
 
@@ -5499,9 +5498,11 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
                 padding: 10px 16px;
                 border-radius: 0px;
             }}
-            QListWidget::item:selected {{
+            QListWidget::item:selected,
+            QListWidget::item:selected:active,
+            QListWidget::item:selected:!active {{
                 background-color: #2a2d2e;
-                color: {config.FG_COLOR};
+                color: #ffffff;
                 border-left: 2px solid {config.BTN_BG};
             }}
             QListWidget::item:focus {{ border: none; outline: none; }}
@@ -5697,6 +5698,13 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             else:
                 self.w_footer.show()
                 
+            # WORKAROUND: Force OS to refresh the main application icon
+            from PySide6.QtWidgets import QApplication
+            QApplication.setWindowIcon(_app_icon())
+            parent_window = self.parentWidget()
+            if parent_window:
+                parent_window.setWindowIcon(_app_icon())
+                
         self.category_list.currentRowChanged.connect(_on_tab_changed)
 
     # ── Helpers ───────────────────────────────────────────────────────────
@@ -5766,6 +5774,7 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
 
         def _add_page_to_stack(page_widget, index=-1):
             scroll = QScrollArea()
+            scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
             scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.NoFrame)
@@ -6661,10 +6670,11 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             form_ai = QFormLayout()
             form_ai.setSpacing(14)
             form_ai.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            l_ai.addLayout(form_ai)
 
             # Device
             _device_items = ["Auto", "CPU", "GPU"]
-            self.dropdown_device = CustomDropdown(_device_items)
+            self.dropdown_device = CustomDropdown(_device_items, parent=page_ai)
             self.dropdown_device.setFixedHeight(30)
             saved_device = prefs.get('device', 'auto').capitalize()
             if saved_device.upper() == 'AUTO': saved_device = 'Auto'
@@ -6673,13 +6683,12 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
 
             # Compute type
             _compute_items = ["Auto", "float16", "int8", "float32", "int8_float16", "int8_float32"]
-            self.dropdown_compute = CustomDropdown(_compute_items)
+            self.dropdown_compute = CustomDropdown(_compute_items, parent=page_ai)
             self.dropdown_compute.setFixedHeight(30)
             saved_compute = prefs.get('ai_compute_type', 'Auto')
             self.dropdown_compute.setText(saved_compute if saved_compute in _compute_items else 'Auto')
             _add_row(form_ai, self.txt("lbl_compute_type"), self.dropdown_compute, 'Auto', self.dropdown_compute.setValue)
 
-            l_ai.addLayout(form_ai)
             l_ai.addSpacing(14)
 
             # Initial prompt label + QTextEdit
@@ -6732,97 +6741,98 @@ class SettingsDialog(FramelessWindowMixin, _BaseDialog):
             form_whisper = QFormLayout()
             form_whisper.setSpacing(14)
             form_whisper.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            l_ai.addLayout(form_whisper)
 
-            self.chk_vad_filter = ToggleSwitch()
+            self.chk_vad_filter = ToggleSwitch(parent=page_ai)
             self.chk_vad_filter.setChecked(bool(prefs.get('ai_vad_filter', False)), animated=False)
-            w_vad = QWidget(); l_vad = QHBoxLayout(w_vad); l_vad.setContentsMargins(0, 0, 0, 0); l_vad.addStretch(); l_vad.addWidget(self.chk_vad_filter)
+            w_vad = QWidget(page_ai); l_vad = QHBoxLayout(w_vad); l_vad.setContentsMargins(0, 0, 0, 0); l_vad.addStretch(); l_vad.addWidget(self.chk_vad_filter)
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_vad_filter"), w_vad, False, lambda v: self.chk_vad_filter.setChecked(v, animated=False)))
 
-            self.chk_condition_prev = ToggleSwitch()
+            self.chk_condition_prev = ToggleSwitch(parent=page_ai)
             self.chk_condition_prev.setChecked(bool(prefs.get('ai_condition_on_prev', False)), animated=False)
-            w_cond = QWidget(); l_cond = QHBoxLayout(w_cond); l_cond.setContentsMargins(0, 0, 0, 0); l_cond.addStretch(); l_cond.addWidget(self.chk_condition_prev)
+            w_cond = QWidget(page_ai); l_cond = QHBoxLayout(w_cond); l_cond.setContentsMargins(0, 0, 0, 0); l_cond.addStretch(); l_cond.addWidget(self.chk_condition_prev)
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_condition_prev"), w_cond, False, lambda v: self.chk_condition_prev.setChecked(v, animated=False)))
 
-            self.spin_beam_size = QSpinBox()
+            self.spin_beam_size = QSpinBox(page_ai)
             self.spin_beam_size.setRange(1, 10)
             self.spin_beam_size.setValue(int(prefs.get('ai_beam_size', 1)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_beam_size"), self.spin_beam_size, 1, self.spin_beam_size.setValue))
 
-            self.spin_temperature = QDoubleSpinBox()
+            self.spin_temperature = QDoubleSpinBox(page_ai)
             self.spin_temperature.setRange(0.0, 1.0)
             self.spin_temperature.setSingleStep(0.1)
             self.spin_temperature.setDecimals(2)
             self.spin_temperature.setValue(float(prefs.get('ai_temperature', 0.0)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_temperature"), self.spin_temperature, 0.0, self.spin_temperature.setValue))
 
-            self.spin_logprob = QDoubleSpinBox()
+            self.spin_logprob = QDoubleSpinBox(page_ai)
             self.spin_logprob.setRange(-3.0, 0.0)
             self.spin_logprob.setSingleStep(0.1)
             self.spin_logprob.setDecimals(2)
             self.spin_logprob.setValue(float(prefs.get('ai_logprob_threshold', -1.0)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_logprob"), self.spin_logprob, -1.0, self.spin_logprob.setValue))
 
-            self.spin_no_speech = QDoubleSpinBox()
+            self.spin_no_speech = QDoubleSpinBox(page_ai)
             self.spin_no_speech.setRange(0.0, 1.0)
             self.spin_no_speech.setSingleStep(0.1)
             self.spin_no_speech.setDecimals(2)
             self.spin_no_speech.setValue(float(prefs.get('ai_no_speech_threshold', 0.6)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_no_speech"), self.spin_no_speech, 0.6, self.spin_no_speech.setValue))
 
-            self.spin_patience = QDoubleSpinBox()
+            self.spin_patience = QDoubleSpinBox(page_ai)
             self.spin_patience.setRange(0.0, 10.0)
             self.spin_patience.setSingleStep(0.1)
             self.spin_patience.setDecimals(2)
             self.spin_patience.setValue(float(prefs.get('ai_patience', 1.0)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_patience"), self.spin_patience, 1.0, self.spin_patience.setValue))
 
-            self.spin_compression = QDoubleSpinBox()
+            self.spin_compression = QDoubleSpinBox(page_ai)
             self.spin_compression.setRange(0.0, 100.0)
             self.spin_compression.setSingleStep(0.1)
             self.spin_compression.setDecimals(2)
             self.spin_compression.setValue(float(prefs.get('ai_compression_ratio_threshold', 2.4)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_compression_ratio"), self.spin_compression, 2.4, self.spin_compression.setValue))
 
-            self.spin_no_repeat = QSpinBox()
+            self.spin_no_repeat = QSpinBox(page_ai)
             self.spin_no_repeat.setRange(0, 100)
             self.spin_no_repeat.setValue(int(prefs.get('ai_no_repeat_ngram_size', 0)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_no_repeat_ngram"), self.spin_no_repeat, 0, self.spin_no_repeat.setValue))
 
-            self.chk_regroup = ToggleSwitch()
+            self.chk_regroup = ToggleSwitch(parent=page_ai)
             self.chk_regroup.setChecked(bool(prefs.get('ai_regroup', False)), animated=False)
-            w_reg = QWidget(); l_reg = QHBoxLayout(w_reg); l_reg.setContentsMargins(0, 0, 0, 0); l_reg.addStretch(); l_reg.addWidget(self.chk_regroup)
+            w_reg = QWidget(page_ai); l_reg = QHBoxLayout(w_reg); l_reg.setContentsMargins(0, 0, 0, 0); l_reg.addStretch(); l_reg.addWidget(self.chk_regroup)
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_regroup"), w_reg, False, lambda v: self.chk_regroup.setChecked(v, animated=False)))
 
-            self.chk_suppress_silence = ToggleSwitch()
+            self.chk_suppress_silence = ToggleSwitch(parent=page_ai)
             self.chk_suppress_silence.setChecked(bool(prefs.get('ai_suppress_silence', False)), animated=False)
-            w_supp = QWidget(); l_supp = QHBoxLayout(w_supp); l_supp.setContentsMargins(0, 0, 0, 0); l_supp.addStretch(); l_supp.addWidget(self.chk_suppress_silence)
+            w_supp = QWidget(page_ai); l_supp = QHBoxLayout(w_supp); l_supp.setContentsMargins(0, 0, 0, 0); l_supp.addStretch(); l_supp.addWidget(self.chk_suppress_silence)
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_suppress_silence"), w_supp, False, lambda v: self.chk_suppress_silence.setChecked(v, animated=False)))
 
-            self.spin_q_levels = QSpinBox()
+            self.spin_q_levels = QSpinBox(page_ai)
             self.spin_q_levels.setRange(0, 100)
             self.spin_q_levels.setValue(int(prefs.get('ai_q_levels', 20)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_q_levels"), self.spin_q_levels, 20, self.spin_q_levels.setValue))
 
-            self.spin_k_size = QSpinBox()
+            self.spin_k_size = QSpinBox(page_ai)
             self.spin_k_size.setRange(0, 100)
             self.spin_k_size.setValue(int(prefs.get('ai_k_size', 5)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_k_size"), self.spin_k_size, 5, self.spin_k_size.setValue))
 
             
-            self.spin_length_penalty = QDoubleSpinBox()
+            self.spin_length_penalty = QDoubleSpinBox(page_ai)
             self.spin_length_penalty.setRange(0.0, 10.0)
             self.spin_length_penalty.setSingleStep(0.1)
             self.spin_length_penalty.setDecimals(2)
             self.spin_length_penalty.setValue(float(prefs.get('ai_length_penalty', 1.0)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_length_penalty") if self.txt("lbl_length_penalty") != "lbl_length_penalty" else "Length Penalty", self.spin_length_penalty, 1.0, self.spin_length_penalty.setValue))
 
-            self.spin_repetition_penalty = QDoubleSpinBox()
+            self.spin_repetition_penalty = QDoubleSpinBox(page_ai)
             self.spin_repetition_penalty.setRange(1.0, 10.0)
             self.spin_repetition_penalty.setSingleStep(0.1)
             self.spin_repetition_penalty.setDecimals(2)
             self.spin_repetition_penalty.setValue(float(prefs.get('ai_repetition_penalty', 1.0)))
             self._advanced_widgets.extend(_add_row(form_whisper, self.txt("lbl_repetition_penalty") if self.txt("lbl_repetition_penalty") != "lbl_repetition_penalty" else "Repetition Penalty", self.spin_repetition_penalty, 1.0, self.spin_repetition_penalty.setValue))
-            l_ai.addLayout(form_whisper)
+            
             l_ai.addStretch()
             _add_page_to_stack(page_ai)
 
@@ -8766,11 +8776,18 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         row_marking_title = QHBoxLayout()
         row_marking_title.addWidget(QLabel(self.txt("lbl_marking_mode")))
         row_marking_title.addStretch()
-        self.btn_clear_transcript = QPushButton("🧹")
+        self.btn_clear_transcript = QPushButton()
         self.btn_clear_transcript.setFixedSize(26, 26)
         self.btn_clear_transcript.setToolTip("") # Force remove native tooltip
         self.btn_clear_transcript.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_clear_transcript.setStyleSheet("background: transparent; border: none; font-size: 12pt; padding: 2px;")
+        _src_dir = os.path.dirname(os.path.abspath(__file__))
+        _prod_assets_dir = os.path.join(_src_dir, "layout")
+        _dev_assets_dir = os.path.join(os.path.dirname(_src_dir), "assets", "layout")
+        _assets_dir = _prod_assets_dir if os.path.exists(_prod_assets_dir) else _dev_assets_dir
+        
+        self.btn_clear_transcript.setIcon(QIcon(os.path.join(_assets_dir, "clean.png")))
+        self.btn_clear_transcript.setIconSize(QSize(18, 18))
+        self.btn_clear_transcript.setStyleSheet("QPushButton { background: transparent; border: none; padding: 2px; } QPushButton:hover { background-color: rgba(255, 255, 255, 10%); border-radius: 4px; }")
         self.btn_clear_transcript.clicked.connect(self._on_clear_transcript)
         row_marking_title.addWidget(self.btn_clear_transcript)
         l_main.addLayout(row_marking_title)
@@ -11121,6 +11138,11 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
                 dlg.category_list.setCurrentRow(i)
                 break
         dlg.exec()
+        
+        # WORKAROUND: Restore main window icon after dialog closes
+        from PySide6.QtWidgets import QApplication
+        QApplication.setWindowIcon(_app_icon())
+        self.setWindowIcon(_app_icon())
         self._build_marker_radio_buttons()
         self.text_canvas.update()
 
@@ -11344,6 +11366,12 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         """Open settings panel."""
         dlg = SettingsDialog(self.engine, self)
         dlg.exec()
+        
+        # WORKAROUND: Restore main window icon after dialog closes
+        from PySide6.QtWidgets import QApplication
+        QApplication.setWindowIcon(_app_icon())
+        self.setWindowIcon(_app_icon())
+        
         self._build_marker_radio_buttons()
         self._apply_dynamic_shortcuts()
         self.text_canvas.update()
