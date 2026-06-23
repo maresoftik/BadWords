@@ -1309,8 +1309,11 @@ except Exception as e:
                     if injected_words:
                         hotwords_str = ", ".join(injected_words)
                         if ai_initial_prompt:
-                            # Just comma separated words at the end
-                            ai_initial_prompt = f"{ai_initial_prompt}. {hotwords_str}."
+                            # Sandwich the hotwords BEFORE the verbatim prompt.
+                            # Whisper's stylistic priming is strongly influenced by the END of the prompt.
+                            # By putting the stuttering prompt at the end, we preserve the verbatim transcription quality
+                            # while still injecting the technical vocabulary into the context.
+                            ai_initial_prompt = f"{hotwords_str}... {ai_initial_prompt}"
                         else:
                             ai_initial_prompt = f"{hotwords_str}."
                         log_info(f"[Hotwords] Injected {len(injected_words)} hotwords into initial_prompt.")

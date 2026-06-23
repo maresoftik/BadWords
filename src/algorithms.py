@@ -708,13 +708,13 @@ class CompareEngine(CompareEngineBase):
                                         is_fuzzy = True
                                         best_s_fuzzy = k
 
-                score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 100.0 if is_exact else -999999.0
-                if best_k_exact > 0: score_exact += best_k_exact * 20
-                if best_s_exact > 0: score_exact += best_s_exact * 20
+                score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 10.0 if is_exact else -999999.0
+                if best_k_exact > 0: score_exact += best_k_exact * 2.0
+                if best_s_exact > 0: score_exact += best_s_exact * 2.0
                 
-                fuzzy_bonus = 50.0
-                if best_k_fuzzy > 0: fuzzy_bonus += best_k_fuzzy * 20
-                if best_s_fuzzy > 0: fuzzy_bonus += best_s_fuzzy * 20
+                fuzzy_bonus = 5.0
+                if best_k_fuzzy > 0: fuzzy_bonus += best_k_fuzzy * 5.0
+                if best_s_fuzzy > 0: fuzzy_bonus += best_s_fuzzy * 5.0
                 score_fuzzy = dp[i-1-best_s_fuzzy][j-1-best_k_fuzzy] + fuzzy_bonus if is_fuzzy else -999999.0
                 score_skip_t = dp[i][j-1] - 0.5
                 score_skip_s = dp[i-1][j] - 5.0
@@ -1041,7 +1041,6 @@ class CompareEngine(CompareEngineBase):
             good_before_words = get_words_from_indices(good_before_idx)
 
             is_retake = False
-            retake_start_pos = 0
             
             # Forward comparison (gap vs next good block) — primary signal
             # This is the core retake check: does the gap repeat what comes next?
@@ -1074,7 +1073,6 @@ class CompareEngine(CompareEngineBase):
                             tail_prefix = prefix_match_count(tail, good_after_words)
                             if tail_prefix >= 2:
                                 is_retake = True
-                                retake_start_pos = start_pos
                                 break
                             tail_content = [w for w in tail if len(w) > 1 and w not in STOP_SET]
                             if len(tail_content) >= 2:
@@ -1084,7 +1082,6 @@ class CompareEngine(CompareEngineBase):
                                     tail_first_matches = tail[0] in good_after_words or any(len(rw) > 1 and check_fuzzy_match(tail[0], rw) for rw in good_after_words)
                                     if tail_first_matches:
                                         is_retake = True
-                                        retake_start_pos = start_pos
                                         break
 
             # Backward comparison (gap vs previous good block) — even stricter
@@ -1104,8 +1101,8 @@ class CompareEngine(CompareEngineBase):
             # True retakes are caught by forward/backward comparison above.
 
             if is_retake:
-                for i_gap, idx in enumerate(gap_indices):
-                    if i_gap >= retake_start_pos and 0 <= idx < self.t_len:
+                for idx in gap_indices:
+                    if 0 <= idx < self.t_len:
                         self.mark_range(idx, idx, 'repeat')
                         real_idx = self.trans_indices[idx]
                         self.words_data[real_idx]['is_retake'] = True
