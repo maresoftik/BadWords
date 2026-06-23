@@ -1564,6 +1564,20 @@ except Exception as e:
                             mf.write("1")
                 except Exception as e:
                     log_error(f"Failed to save model init marker: {e}")
+                    
+                # Re-index IDs and rebuild segments_data (since Phase G or absorb_inaudible might have shrunk the list)
+                for i, w in enumerate(words_data):
+                    w['id'] = i
+                
+                segments_data = []
+                current_seg = []
+                for w in words_data:
+                    if w.get('is_segment_start') and current_seg:
+                        segments_data.append(current_seg)
+                        current_seg = []
+                    current_seg.append(w)
+                if current_seg:
+                    segments_data.append(current_seg)
 
             update_progress(100)
             return words_data, segments_data
@@ -2180,8 +2194,12 @@ except Exception as e:
         algo_settings = {k: prefs[k] for k in ('algo_fuzzy_threshold', 'algo_retake_lookahead', 'algo_distance_penalty', 'algo_anchor_depth') if k in prefs}
         processed_words, count = algorithms.analyze_repeats(words_data, show_inaudible=show_inaudible, algo_settings=algo_settings)
         processed_words = algorithms.absorb_inaudible_into_repeats(processed_words)
-        # FIX: Force hallucination status after manual re-analysis
         processed_words = self._enforce_hallucination_status(processed_words)
+        
+        # Re-index IDs to prevent UI selection desync after word deletion
+        for i, w in enumerate(processed_words):
+            w['id'] = i
+            
         return processed_words, count
 
     def run_comparison_analysis(self, script_text, words_data):
@@ -2200,6 +2218,11 @@ except Exception as e:
         final_words = algorithms.absorb_inaudible_into_repeats(result_words)
         # FIX: Force hallucination status after script comparison analysis
         final_words = self._enforce_hallucination_status(final_words)
+        
+        # Re-index IDs to prevent UI selection desync after word deletion
+        for i, w in enumerate(final_words):
+            w['id'] = i
+            
         return final_words
 
     # ==========================================

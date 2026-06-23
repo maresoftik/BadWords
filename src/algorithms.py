@@ -675,10 +675,10 @@ class CompareEngine(CompareEngineBase):
                         t_first = t_word[0] if t_word else ''
                         if t_first == s_first or t_word[-1:] == s_word[-1:] or t_word in s_word:
                             combo = t_word
-                            for k in range(1, 7):
+                            for k in range(1, 12):
                                 if j - 1 - k >= 0:
                                     combo = combo + t_rev[j - 1 - k]
-                                    if len(combo) > s_len + 3:
+                                    if len(combo) > s_len + 5:
                                         break
                                     if s_word == combo:
                                         is_exact = True
@@ -695,10 +695,10 @@ class CompareEngine(CompareEngineBase):
                         t_first = t_word[0] if t_word else ''
                         if s_first == t_first or s_word[-1:] == t_word[-1:] or s_word in t_word:
                             combo_s = s_word
-                            for k in range(1, 7):
+                            for k in range(1, 12):
                                 if i - 1 - k >= 0:
                                     combo_s = combo_s + s_rev[i - 1 - k]
-                                    if len(combo_s) > len(t_word) + 3:
+                                    if len(combo_s) > len(t_word) + 5:
                                         break
                                     if combo_s == t_word:
                                         is_exact = True
@@ -708,8 +708,14 @@ class CompareEngine(CompareEngineBase):
                                         is_fuzzy = True
                                         best_s_fuzzy = k
 
-                score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 10.0 if is_exact else -999999.0
-                score_fuzzy = dp[i-1-best_s_fuzzy][j-1-best_k_fuzzy] + 5.0 if is_fuzzy else -999999.0
+                score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 100.0 if is_exact else -999999.0
+                if best_k_exact > 0: score_exact += best_k_exact * 20
+                if best_s_exact > 0: score_exact += best_s_exact * 20
+                
+                fuzzy_bonus = 50.0
+                if best_k_fuzzy > 0: fuzzy_bonus += best_k_fuzzy * 20
+                if best_s_fuzzy > 0: fuzzy_bonus += best_s_fuzzy * 20
+                score_fuzzy = dp[i-1-best_s_fuzzy][j-1-best_k_fuzzy] + fuzzy_bonus if is_fuzzy else -999999.0
                 score_skip_t = dp[i][j-1] - 0.5
                 score_skip_s = dp[i-1][j] - 5.0
                 
@@ -1189,6 +1195,39 @@ class CompareEngine(CompareEngineBase):
                     
             merged['text'] = combo_text
             merged['end'] = self.words_data[last_real]['end']
+            
+            # --- Smart Auto-Correction Logic ---
+            script_raw = self.script_tokens[s_idx]
+            import re
+            # Define what constitutes a technical term
+            is_tech = bool(re.search(r'[/.\\]|\b[a-zA-Z]+[0-9]+', script_raw))
+            script_digits = re.sub(r'\D', '', script_raw)
+            combo_digits = re.sub(r'\D', '', combo_text)
+            
+            # Determine DP score for this match
+            p_val = next((p for t, s, p in match_pairs if s == s_idx and t in t_indices), 1)
+            
+            should_autocorrect = False
+            if p_val == 0:
+                # Exact match. Safe to snap to script text to remove Whisper's weird spaces.
+                should_autocorrect = True
+            elif is_tech and p_val == 1:
+                # Fuzzy match for a technical term.
+                import difflib
+                from algorithms import super_clean
+                s_fp = super_clean(script_raw)
+                c_fp = super_clean(combo_text)
+                if s_fp and c_fp:
+                    ratio = difflib.SequenceMatcher(None, s_fp, c_fp).ratio()
+                    if ratio >= 0.85 and script_digits == combo_digits:
+                        should_autocorrect = True
+                        
+            if should_autocorrect:
+                merged['text'] = script_raw
+                # Force status to normal
+                merged['status'] = None
+                merged['is_auto'] = False
+                merged['algo_status'] = None
             
             # Replace the group of words with the merged word
             self.words_data[first_real:last_real+1] = [merged]
