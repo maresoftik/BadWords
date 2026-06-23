@@ -262,6 +262,8 @@ class CompareEngineBase:
     def __init__(self, script_text, words_data, algo_settings=None):
         # --- Stage 6A: Unpack algorithm tuning parameters with safe defaults ---
         _s = algo_settings or {}
+        self.algo_settings = _s  # Save original settings dictionary for conditional phases
+        
         # fuzzy_threshold is stored as 0-100 in settings; normalize to 0.0-1.0
         self.fuzzy_thresh     = _s.get('algo_fuzzy_threshold', 80) / 100.0
         self.retake_lookahead = int(_s.get('algo_retake_lookahead', 80))
@@ -657,6 +659,8 @@ class CompareEngine(CompareEngineBase):
                 is_fuzzy = False
                 best_k_exact = 0
                 best_k_fuzzy = 0
+                best_s_exact = 0
+                best_s_fuzzy = 0
                 
                 if not is_exact:
                     if s_len > 3 and t_word in s_word:
@@ -684,18 +688,46 @@ class CompareEngine(CompareEngineBase):
                                         is_fuzzy = True
                                         best_k_fuzzy = k
                                         # Don't break — keep looking for exact
-                
-                score_exact = dp[i-1][j-1-best_k_exact] + 10.0 if is_exact else -999999.0
-                score_fuzzy = dp[i-1][j-1-best_k_fuzzy] + 5.0 if is_fuzzy else -999999.0
+
+                    # Inverse lookahead: Hotword Merger may combine transcript words into 1,
+                    # but the script might have them split (e.g. 'Input 0').
+                    if not is_exact and t_word != "" and len(s_word) < len(t_word) and len(t_word) > 3:
+                        t_first = t_word[0] if t_word else ''
+                        if s_first == t_first or s_word[-1:] == t_word[-1:] or s_word in t_word:
+                            combo_s = s_word
+                            for k in range(1, 7):
+                                if i - 1 - k >= 0:
+                                    combo_s = combo_s + s_rev[i - 1 - k]
+                                    if len(combo_s) > len(t_word) + 3:
+                                        break
+                                    if combo_s == t_word:
+                                        is_exact = True
+                                        best_s_exact = k
+                                        break
+                                    elif check_fuzzy(combo_s, t_word):
+                                        is_fuzzy = True
+                                        best_s_fuzzy = k
+
+                score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 10.0 if is_exact else -999999.0
+                score_fuzzy = dp[i-1-best_s_fuzzy][j-1-best_k_fuzzy] + 5.0 if is_fuzzy else -999999.0
                 score_skip_t = dp[i][j-1] - 0.5
                 score_skip_s = dp[i-1][j] - 5.0
                 
                 best_score = score_exact
-                best_ptr = 10 + best_k_exact if is_exact else 0
-                
+                if is_exact:
+                    if best_s_exact > 0:
+                        best_ptr = 30 + best_s_exact
+                    else:
+                        best_ptr = 10 + best_k_exact
+                else:
+                    best_ptr = 0
+                    
                 if score_fuzzy > best_score:
                     best_score = score_fuzzy
-                    best_ptr = 20 + best_k_fuzzy
+                    if best_s_fuzzy > 0:
+                        best_ptr = 40 + best_s_fuzzy
+                    else:
+                        best_ptr = 20 + best_k_fuzzy
                     
                 if score_skip_t >= best_score:
                     best_score = score_skip_t
@@ -737,7 +769,7 @@ class CompareEngine(CompareEngineBase):
                     match_pairs.append((actual_t, actual_s, 0))
                 i -= 1
                 j -= (k + 1)
-            elif p >= 20:
+            elif p >= 20 and p < 30:
                 k = p - 20
                 actual_s = S - i
                 for step in range(k + 1):
@@ -745,6 +777,22 @@ class CompareEngine(CompareEngineBase):
                     match_pairs.append((actual_t, actual_s, 1))
                 i -= 1
                 j -= (k + 1)
+            elif p >= 30 and p < 40:
+                k = p - 30
+                actual_t = T - j
+                for step in range(k + 1):
+                    actual_s = S - (i - step)
+                    match_pairs.append((actual_t, actual_s, 0))
+                i -= (k + 1)
+                j -= 1
+            elif p >= 40:
+                k = p - 40
+                actual_t = T - j
+                for step in range(k + 1):
+                    actual_s = S - (i - step)
+                    match_pairs.append((actual_t, actual_s, 1))
+                i -= (k + 1)
+                j -= 1
             elif p == 2:
                 j -= 1
             elif p == 3:
@@ -763,7 +811,11 @@ class CompareEngine(CompareEngineBase):
         self._phase_d_smart_fragment_fill()
         self._phase_e_fill_dp_gaps(match_pairs)
         self._phase_f_retake_detection(match_pairs)
+        
+        if self.algo_settings and self.algo_settings.get('run_phase_g', False):
+            self._phase_g_merge_combos(match_pairs)
 
+        end_time = time.time()
         result = AnalysisResult(self.words_data)
         result.missing_indices = self.missing_script_indices
         return result
@@ -1089,10 +1141,58 @@ class CompareEngine(CompareEngineBase):
                 w['is_retake'] = False
 
         # F.2b (Typo->Repeat Promotion) was removed because it aggressively bled blue color into valid green/red segments.
-
-
-
         # F.4 was removed because it aggressively suppressed valid 2-word errors.
+
+    def _phase_g_merge_combos(self, match_pairs):
+        """
+        Groups transcript words that were mapped to the exact same script word 
+        (via split-word combo lookahead) and merges them into a single word 
+        in self.words_data to clean up the UI presentation.
+        """
+        from collections import defaultdict
+        s_to_t = defaultdict(list)
+        for t_idx, s_idx, p in match_pairs:
+            s_to_t[s_idx].append(t_idx)
+            
+        merge_groups = []
+        for s_idx, t_indices in s_to_t.items():
+            if len(t_indices) > 1:
+                t_indices.sort()
+                # Ensure they are contiguous
+                is_contiguous = True
+                for i in range(1, len(t_indices)):
+                    if t_indices[i] != t_indices[i-1] + 1:
+                        is_contiguous = False
+                        break
+                if is_contiguous:
+                    merge_groups.append((s_idx, t_indices))
+                    
+        # Sort groups in reverse order so merging doesn't affect earlier indices
+        merge_groups.sort(key=lambda x: x[1][0], reverse=True)
+        
+        for s_idx, t_indices in merge_groups:
+            real_indices = [self.trans_indices[t] for t in t_indices]
+            first_real = real_indices[0]
+            last_real = real_indices[-1]
+            
+            merged = self.words_data[first_real].copy()
+            
+            # Combine the text of all merged words to preserve original transcription
+            # with spaces between them, unless they don't have spaces natively.
+            combo_text = ""
+            for r in real_indices:
+                w_text = self.words_data[r].get('text', '')
+                if combo_text and not w_text.startswith(" ") and not w_text.startswith("-"):
+                    combo_text += " " + w_text
+                else:
+                    combo_text += w_text
+                    
+            merged['text'] = combo_text
+            merged['end'] = self.words_data[last_real]['end']
+            
+            # Replace the group of words with the merged word
+            self.words_data[first_real:last_real+1] = [merged]
+
 
 def compare_script_to_transcript(script_text, words_data, algo_settings=None):
     engine = CompareEngine(script_text, words_data, algo_settings=algo_settings)

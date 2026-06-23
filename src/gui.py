@@ -10894,6 +10894,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             "filler_words": config.DEFAULT_BAD_WORDS,
             "timeline_name": selected_tl_name or None,
             "track_indices": track_indices or None,
+            "expected_script": self.text_script.toPlainText(),
         }
 
         

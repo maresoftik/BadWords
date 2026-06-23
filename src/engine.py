@@ -1288,6 +1288,33 @@ except Exception as e:
             # then falls back to a language-specific verbatim prompt, then GOLDEN baseline.
             # lang is resolved above (None = auto-detect, str = specific language code)
             ai_initial_prompt = config.get_whisper_prompt_for_lang(lang, user_custom_prompt)
+            
+            # --- HOTWORDS INJECTION ---
+            expected_script = settings.get('expected_script', '').strip()
+            if expected_script:
+                hotwords_list = self._extract_hotwords(expected_script)
+                if hotwords_list:
+                    # Whisper token limit for initial prompt is ~224 tokens. 
+                    # We limit the added hotwords string to ~500 chars to be safe.
+                    # We prioritize longer words as they are usually more specific.
+                    hotwords_list.sort(key=len, reverse=True)
+                    injected_words = []
+                    current_len = 0
+                    for hw in hotwords_list:
+                        if current_len + len(hw) + 2 > 500: # +2 for comma and space
+                            break
+                        injected_words.append(hw)
+                        current_len += len(hw) + 2
+                    
+                    if injected_words:
+                        hotwords_str = ", ".join(injected_words)
+                        if ai_initial_prompt:
+                            # Just comma separated words at the end
+                            ai_initial_prompt = f"{ai_initial_prompt}. {hotwords_str}."
+                        else:
+                            ai_initial_prompt = f"{hotwords_str}."
+                        log_info(f"[Hotwords] Injected {len(injected_words)} hotwords into initial_prompt.")
+
             log_info(f"[Prompt] lang={lang!r} → using {'custom' if user_custom_prompt else 'per-lang/golden'} prompt.")
             algo_settings   = {k: saved_prefs[k] for k in (
                 'algo_fuzzy_threshold', 'algo_retake_lookahead',
@@ -1504,13 +1531,28 @@ except Exception as e:
 
             words_data, segments_data = self._build_data_structure(
                 data, silence_ranges, filler_words, fps, 
-                txt_inaudible, time_scale_correction
+                txt_inaudible, time_scale_correction,
+                expected_script=expected_script
             )
             
             if words_data:
                 update_status(self.txt("status_finalize"))
-                # Wyrzuciliśmy automatyczne odpalanie algorytmów na start (pełen RAW text dla GUI)
+                
+                # --- AUTO COMPARE PHASE ---
+                if expected_script:
+                    log_info("Auto-running CompareEngine post-transcription with Phase G...")
+                    update_progress(-1)
+                    algo_settings_copy = dict(settings.get("algo_settings", {}))
+                    algo_settings_copy['run_phase_g'] = True
+                    import algorithms
+                    compare_result = algorithms.compare_script_to_transcript(
+                        expected_script, words_data, algo_settings=algo_settings_copy
+                    )
+                    words_data = compare_result
+                    self.sbs_cache = None
+
                 words_data = algorithms.absorb_inaudible_into_repeats(words_data)
+                
                 # Mark model as successfully used via a marker file
                 try:
                     _hist_key = model if model != "large" else "large-v3"
@@ -1568,7 +1610,8 @@ except Exception as e:
 
 
     def _build_data_structure(self, json_data, silence_ranges, filler_words, fps, 
-                              txt_inaudible="inaudible", time_scale_correction=1.0):
+                              txt_inaudible="inaudible", time_scale_correction=1.0,
+                              expected_script=None):
         prefs = self.os_doc.get_all_prefs()
         temp_words = []
         dynamic_bad = [w.lower().strip() for w in filler_words]
