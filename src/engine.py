@@ -2076,16 +2076,26 @@ except Exception as e:
                 if 'seg_end' in w_clean: w_clean['seg_end'] = round(w['seg_end'], 3)
                 optimized_words.append(w_clean)
 
-            project_state = {
-                "version": config.VERSION,
-                "timestamp": time.time(),
-                "lang_code": data_packet.get("lang_code", "en"),
-                "settings": data_packet.get("settings", {}),
-                "title_bar_text": data_packet.get("title_bar_text", ""),
-                "filler_words": data_packet.get("filler_words", []),
-                "words_data": optimized_words,
-                "script_content": data_packet.get("script_content", "")
-            }
+            # Optimize chapters floats if present
+            chapters = data_packet.get("chapters", [])
+            for ch in chapters:
+                if "words" in ch:
+                    ch_words = []
+                    for w in ch["words"]:
+                        w_clean = w.copy()
+                        w_clean['start'] = round(w['start'], 3)
+                        w_clean['end'] = round(w['end'], 3)
+                        if 'seg_start' in w_clean: w_clean['seg_start'] = round(w['seg_start'], 3)
+                        if 'seg_end' in w_clean: w_clean['seg_end'] = round(w['seg_end'], 3)
+                        ch_words.append(w_clean)
+                    ch["words"] = ch_words
+
+            project_state = data_packet.copy()
+            project_state["version"] = config.VERSION
+            project_state["timestamp"] = time.time()
+            project_state["words_data"] = optimized_words
+            if "chapters" in project_state:
+                project_state["chapters"] = chapters
 
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(project_state, f, separators=(',', ':'))

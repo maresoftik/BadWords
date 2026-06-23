@@ -9315,23 +9315,6 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         
         path, _ = QFileDialog.getSaveFileName(self, self.txt("btn_export_project"), os.path.join(saves_dir, default_filename), "JSON Files (*.json)")
         if not path: return
-        
-        prefs = self.engine.load_preferences() or {}
-
-        # GATHER ACTIVE PANELS (Using correct attribute names)
-        active_panels = []
-        nav_btns = [
-            getattr(self, 'btn_nav_script',   None), getattr(self, 'btn_nav_silence', None),
-            getattr(self, 'btn_nav_fillers',  None), getattr(self, 'btn_nav_main',    None),
-            getattr(self, 'btn_nav_assembly', None)
-        ]
-        for btn in nav_btns:
-            if btn and getattr(btn, 'is_active', False):
-                active_panels.append(btn.activity_id)
-
-        # SMUGGLE LAYOUT DATA INTO PREFS TO BYPASS ENGINE RESTRICTIONS
-        prefs['ui_active_panels']  = active_panels
-        prefs['ui_splitter_sizes'] = self._main_h_splitter.sizes() if hasattr(self, '_main_h_splitter') else []
 
         clean_words = self._get_clean_words_data()
 
@@ -9339,17 +9322,26 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         if getattr(self, '_current_chapter_idx', -1) >= 0 and self._chapters:
             self._chapters[self._current_chapter_idx]['words'] = clean_words
             
+        sbs_cache = None
+        if getattr(self, '_sbs_last_script_hash', None):
+            sbs_cache = {
+                "hash": self._sbs_last_script_hash,
+                "rows": []
+            }
+            
+        analysis_time = ""
+        if hasattr(self, 'lbl_analysis_duration') and self.lbl_analysis_duration.isVisible():
+            analysis_time = self.lbl_analysis_duration.text()
+            
         data_packet = {
-            "lang_code":      prefs.get('lang', 'Auto'),
-            "settings":       prefs,
-            "title_bar_text": getattr(self, '_title_bar', None)._lbl_title.text() if hasattr(self, '_title_bar') else "BadWords",
-            "filler_words":   prefs.get('filler_words', config.DEFAULT_BAD_WORDS),
             "words_data":     clean_words,
             "chapters":       getattr(self, '_chapters', []),
             "current_chapter_idx": getattr(self, '_current_chapter_idx', -1),
-            "script_content": getattr(self, 'text_script', None).toPlainText() if hasattr(self, 'text_script') else ""
+            "script_content": getattr(self, 'text_script', None).toPlainText() if hasattr(self, 'text_script') else "",
+            "transcription_source": getattr(self, '_transcription_source', None),
+            "sbs_cache":      sbs_cache,
+            "analysis_time":  analysis_time
         }
-        # Note: layout state is inside 'settings', not at the root level
         self.engine.save_project_state(path, data_packet)
 
     def _on_import_project(self):
@@ -9367,21 +9359,21 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
 
             from PySide6.QtCore import QTimer
 
-            # --- 1. SYNC UI PREFERENCES ---
-            imported_prefs = state.get('settings', {})
-            
+            from_main_window = False
+            if hasattr(self, '_stack') and self._stack.currentIndex() != 2:
+                from_main_window = True
+
             # --- Restore Source Snapshot ---
-            imported_snapshot = (state.get('settings') or {}).get('transcription_source')
+            imported_snapshot = state.get('transcription_source')
+            if not imported_snapshot and 'settings' in state:
+                # Fallback for older saves
+                imported_snapshot = (state.get('settings') or {}).get('transcription_source')
+                
             if imported_snapshot:
                 self._transcription_source = imported_snapshot
-
-            # --- Restore Title Bar ---
-            title_text = state.get('title_bar_text', '')
-            if title_text and title_text != "BadWords":
-                if hasattr(self, '_title_bar'):
-                    self._title_bar.set_title(title_text)
-            elif self._transcription_source:
-                # Rebuild title from snapshot
+                
+            # Rebuild title from snapshot
+            if getattr(self, '_transcription_source', None):
                 snap = self._transcription_source
                 tl_name = snap.get('timeline_name', '')
                 track_names = snap.get('track_names', [])
@@ -9393,80 +9385,26 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
                     if hasattr(self, '_title_bar'):
                         self._title_bar.set_title(rebuilt_title)
 
-            if imported_prefs:
-                self.engine.save_preferences(imported_prefs)
+            # --- Restore Analysis Time ---
+            analysis_time = state.get('analysis_time', "")
+            if analysis_time and hasattr(self, 'lbl_analysis_duration'):
+                self.lbl_analysis_duration.setText(analysis_time)
+                self.lbl_analysis_duration.setVisible(True)
 
-                # Update Toggle Switches
-                toggles = [
-                    ('ui_tgl_silence_cut',    getattr(self, 'tgl_silence_cut',    None)),
-                    ('ui_tgl_silence_mark',   getattr(self, 'tgl_silence_mark',   None)),
-                    ('ui_tgl_show_inaudible', getattr(self, 'tgl_show_inaudible', None)),
-                    ('ui_tgl_mark_inaudible', getattr(self, 'tgl_mark_inaudible', None)),
-                    ('ui_tgl_show_typos',     getattr(self, 'tgl_show_typos',     None)),
-                    ('ui_tgl_ripple_delete',  getattr(self, 'tgl_ripple_delete',  None)),
-                    ('ui_tgl_auto_filler',    getattr(self, 'tgl_auto_filler',    None)),
-                ]
-                for key, widget in toggles:
-                    if widget and key in imported_prefs:
-                        widget.setChecked(imported_prefs[key], animated=False)
-
-                # Restore Standalone Silence Detection inputs (QLineEdit-based)
-                if hasattr(self, 'input_fs_thresh') and 'silence_threshold_db' in imported_prefs:
-                    self.input_fs_thresh.setText(str(imported_prefs['silence_threshold_db']))
-                if hasattr(self, 'input_fs_pad') and 'ui_spin_pad' in imported_prefs:
-                    self.input_fs_pad.setText(str(imported_prefs['ui_spin_pad']))
-                if hasattr(self, 'input_fs_min_dur') and 'silence_min_dur' in imported_prefs:
-                    self.input_fs_min_dur.setText(str(imported_prefs['silence_min_dur']))
-
-                # Restore pinned favorites visually
-                for fav_id in imported_prefs.get('favorites', []):
-                    if hasattr(self, '_pin_buttons') and fav_id in self._pin_buttons:
-                        if not hasattr(self, '_favorite_proxies') or fav_id not in self._favorite_proxies:
-                            self._pin_buttons[fav_id].click()
-                # Update pinned favorites label visibility
-                if hasattr(self, 'lbl_pinned_favorites') and hasattr(self, '_favorite_proxies'):
-                    self.lbl_pinned_favorites.setVisible(len(self._favorite_proxies) > 0)
+            # --- Restore SBS Cache ---
+            sbs_cache = state.get('sbs_cache')
+            if sbs_cache:
+                self._sbs_last_script_hash = sbs_cache.get('hash')
+                if hasattr(self, 'text_canvas'):
+                    self.text_canvas.sbs_rows = sbs_cache.get('rows', [])
+            else:
+                self._sbs_last_script_hash = None
+                if hasattr(self, 'text_canvas'):
+                    self.text_canvas.sbs_rows = []
 
             # Restore Script
             if hasattr(self, 'text_script') and 'script_content' in state:
                 self.text_script.setText(state['script_content'])
-
-            # --- 2. SWITCH TO EDITOR CONTEXT ---
-            if hasattr(self, 'go_to_page'):
-                self.go_to_page(2)
-
-            # EXTRACT SMUGGLED UI STATE FROM PREFS
-            saved_panels = imported_prefs.get('ui_active_panels', [])
-            saved_sizes  = imported_prefs.get('ui_splitter_sizes', [])
-
-            # --- 3. BULLETPROOF PANEL RESTORATION ---
-            if hasattr(self, '_panel_left'):  self._panel_left.hide()
-            if hasattr(self, '_panel_right'): self._panel_right.hide()
-
-            # STRICT MAPPING: exact activity_id string -> actual button instance
-            nav_map = {
-                'script_analysis': getattr(self, 'btn_nav_script',   None),
-                'silence':         getattr(self, 'btn_nav_silence',  None),
-                'fillers':         getattr(self, 'btn_nav_fillers',  None),
-                'main_panel':      getattr(self, 'btn_nav_main',     None),
-                'assembly':        getattr(self, 'btn_nav_assembly', None),
-            }
-
-            # Force all buttons off safely
-            for act_id, btn in nav_map.items():
-                if btn:
-                    btn.is_active = False
-                    btn.style().unpolish(btn)
-                    btn.style().polish(btn)
-
-            QApplication.processEvents()
-
-            # Forcefully trigger saved panels
-            for act_id in saved_panels:
-                if act_id in nav_map and nav_map[act_id] is not None:
-                    self._toggle_activity(act_id)
-
-            QApplication.processEvents()
 
             # Load Words Data
             if hasattr(self, 'text_canvas'):
@@ -9483,7 +9421,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
                 import copy
                 self._chapters = [{
                     "name": "Original",
-                    "tl_name": self._transcription_source.get("timeline_name", "") if self._transcription_source else "",
+                    "tl_name": self._transcription_source.get("timeline_name", "") if getattr(self, '_transcription_source', None) else "",
                     "words": copy.deepcopy(state.get('words_data', []))
                 }]
                 self._current_chapter_idx = 0
@@ -9491,7 +9429,6 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             # Update Dropdown UI
             if self._chapters and hasattr(self, '_title_bar') and hasattr(self._title_bar, 'chapter_dropdown'):
                 self._title_bar.chapter_dropdown.options_list = [ch['name'] for ch in self._chapters]
-                # Try to select current chapter name, otherwise default to first
                 if 0 <= self._current_chapter_idx < len(self._chapters):
                     self._title_bar.chapter_dropdown.setText(self._chapters[self._current_chapter_idx]['name'])
                 if len(self._chapters) > 1:
@@ -9500,9 +9437,19 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
                     self._title_bar.chapter_dropdown.hide()
                 self._title_bar.update_dropdown_placement()
 
-            # Apply splitter sizes
-            if saved_sizes and hasattr(self, '_main_h_splitter'):
-                QTimer.singleShot(150, lambda: self._main_h_splitter.setSizes(saved_sizes))
+            # --- SWITCH TO EDITOR CONTEXT AND OPEN PANELS IF NEEDED ---
+            if from_main_window:
+                if hasattr(self, 'go_to_page'):
+                    self.go_to_page(2)
+                
+                # Open script panel and main panel
+                if hasattr(self, 'btn_nav_script'):
+                    if not getattr(self.btn_nav_script, 'is_active', False):
+                        self._toggle_activity('script_analysis')
+                if hasattr(self, 'btn_nav_main'):
+                    if not getattr(self.btn_nav_main, 'is_active', False):
+                        self._toggle_activity('main_panel')
+
         except Exception as e:
             from osdoc import log_error
             log_error(f"Failed to load project: {e}")
