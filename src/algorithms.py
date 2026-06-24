@@ -691,13 +691,13 @@ class CompareEngine(CompareEngineBase):
                 if s_word == t_word and s_word != "":
                     is_exact = True
                 else:
-                    if s_len > 3 and t_word in s_word:
+                    if s_len > 3 and len(t_word) > 3 and t_word in s_word:
                         is_fuzzy = True
                     elif check_fuzzy(s_word, t_word):
                         is_fuzzy = True
                         
                     if s_word != "" and t_len < s_len and s_len > 3:
-                        if t_first == s_first or t_last == s_last or t_word in s_word:
+                        if t_first == s_first or t_last == s_last or (len(t_word) > 3 and t_word in s_word):
                             combo = t_word
                             for k in range(1, 12):
                                 if j - 1 - k >= 0:
@@ -713,7 +713,7 @@ class CompareEngine(CompareEngineBase):
                                         best_k_fuzzy = k
 
                     if not is_exact and t_word != "" and s_len < t_len and t_len > 3:
-                        if s_first == t_first or s_last == t_last or s_word in t_word:
+                        if s_first == t_first or s_last == t_last or (len(s_word) > 3 and s_word in t_word):
                             combo_s = s_word
                             for k in range(1, 12):
                                 if i - 1 - k >= 0:
@@ -728,18 +728,35 @@ class CompareEngine(CompareEngineBase):
                                         is_fuzzy = True
                                         best_s_fuzzy = k
 
+                # v11.0: Contiguity and Recency Bonuses
+                # 1. Recency tie-breaker: slightly prefer matches near the end of the transcript (small j).
+                # This mathematically guarantees we ALWAYS pick the final take.
+                recency_bonus = (T - j) * 0.005 
+                
                 if is_exact:
-                    score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 10.0 + (best_k_exact * 2.0) + (best_s_exact * 2.0)
+                    walk_i = i - 1 - best_s_exact
+                    walk_j = j - 1 - best_k_exact
+                    while walk_i > 0 and ptr[walk_i][walk_j] == 3:
+                        walk_i -= 1
+                    prev_ptr = ptr[walk_i][walk_j]
+                    contiguity = 15.0 if (best_k_exact == 0 and prev_ptr >= 10) else 0.0
+                    score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 10.0 + contiguity + recency_bonus + (best_k_exact * 2.0) + (best_s_exact * 2.0)
                 else:
                     score_exact = -999999.0
                     
                 if is_fuzzy:
-                    score_fuzzy = dp[i-1-best_s_fuzzy][j-1-best_k_fuzzy] + 5.0 + (best_k_fuzzy * 5.0) + (best_s_fuzzy * 5.0)
+                    walk_i = i - 1 - best_s_fuzzy
+                    walk_j = j - 1 - best_k_fuzzy
+                    while walk_i > 0 and ptr[walk_i][walk_j] == 3:
+                        walk_i -= 1
+                    prev_ptr = ptr[walk_i][walk_j]
+                    contiguity = 15.0 if (best_k_fuzzy == 0 and prev_ptr >= 10) else 0.0
+                    score_fuzzy = dp[i-1-best_s_fuzzy][j-1-best_k_fuzzy] + 5.0 + contiguity + recency_bonus + (best_k_fuzzy * 5.0) + (best_s_fuzzy * 5.0)
                 else:
                     score_fuzzy = -999999.0
 
                 score_skip_t = dp[i][j-1] - 0.5
-                score_skip_s = dp[i-1][j] - 5.0
+                score_skip_s = dp[i-1][j] - 2.0
                 
                 # Fast path for non-matching case (happens ~95% of time)
                 if score_exact == -999999.0 and score_fuzzy == -999999.0:
@@ -753,11 +770,19 @@ class CompareEngine(CompareEngineBase):
                 
                 # Slower path if we have a match
                 best_score = score_exact
-                best_ptr = (30 + best_s_exact) if (is_exact and best_s_exact > 0) else ((10 + best_k_exact) if is_exact else 0)
+                if is_exact and best_s_exact > 0:
+                    best_ptr = 30 + best_s_exact
+                elif is_exact:
+                    best_ptr = 10 + best_k_exact
+                else:
+                    best_ptr = 0
                     
                 if score_fuzzy > best_score:
                     best_score = score_fuzzy
-                    best_ptr = (40 + best_s_fuzzy) if best_s_fuzzy > 0 else (20 + best_k_fuzzy)
+                    if best_s_fuzzy > 0:
+                        best_ptr = 40 + best_s_fuzzy
+                    else:
+                        best_ptr = 20 + best_k_fuzzy
                     
                 if score_skip_t >= best_score:
                     best_score = score_skip_t
@@ -770,6 +795,8 @@ class CompareEngine(CompareEngineBase):
                 dp[i][j] = best_score
                 ptr[i][j] = best_ptr
 
+        self.dp = dp
+        self.ptr = ptr
         i = S
         j = T
         match_pairs = []
@@ -1183,16 +1210,19 @@ class CompareEngine(CompareEngineBase):
             
         merge_groups = []
         for s_idx, t_indices in s_to_t.items():
-            if len(t_indices) > 1:
-                t_indices.sort()
-                # Ensure they are contiguous
-                is_contiguous = True
-                for i in range(1, len(t_indices)):
-                    if t_indices[i] != t_indices[i-1] + 1:
-                        is_contiguous = False
-                        break
-                if is_contiguous:
-                    merge_groups.append((s_idx, t_indices))
+            if not t_indices:
+                continue
+            t_indices.sort()
+            
+            # Check contiguity for merging
+            is_contiguous = True
+            for i in range(1, len(t_indices)):
+                if t_indices[i] != t_indices[i-1] + 1:
+                    is_contiguous = False
+                    break
+                    
+            if is_contiguous:
+                merge_groups.append((s_idx, t_indices))
                     
         # Sort groups in reverse order so merging doesn't affect earlier indices
         merge_groups.sort(key=lambda x: x[1][0], reverse=True)
@@ -1204,53 +1234,56 @@ class CompareEngine(CompareEngineBase):
             
             merged = self.words_data[first_real].copy()
             
-            # Combine the text of all merged words to preserve original transcription
-            # with spaces between them, unless they don't have spaces natively.
-            combo_text = ""
-            for r in real_indices:
-                w_text = self.words_data[r].get('text', '')
-                if combo_text and not w_text.startswith(" ") and not w_text.startswith("-"):
-                    combo_text += " " + w_text
-                else:
-                    combo_text += w_text
-                    
-            merged['text'] = combo_text
+            # Combine the text if multiple words
+            if len(t_indices) > 1:
+                combo_text = ""
+                for r in real_indices:
+                    w_text = self.words_data[r].get('text', '')
+                    if combo_text and not w_text.startswith(" ") and not w_text.startswith("-"):
+                        combo_text += " " + w_text
+                    else:
+                        combo_text += w_text
+                merged['text'] = combo_text
+            else:
+                combo_text = merged.get('text', '')
+                
             merged['end'] = self.words_data[last_real]['end']
             
             # --- Smart Auto-Correction Logic ---
             script_raw = self.script_tokens[s_idx]
             import re
-            # Define what constitutes a technical term
             is_tech = bool(re.search(r'[/.\\]|\b[a-zA-Z]+[0-9]+', script_raw))
             script_digits = re.sub(r'\D', '', script_raw)
             combo_digits = re.sub(r'\D', '', combo_text)
             
-            # Determine DP score for this match
             p_val = next((p for t, s, p in match_pairs if s == s_idx and t in t_indices), 1)
             
             should_autocorrect = False
-            if p_val == 0:
-                # Exact match. Safe to snap to script text to remove Whisper's weird spaces.
+            if p_val == 0 and len(t_indices) > 1:
+                # Exact combo match. Safe to snap.
                 should_autocorrect = True
             elif is_tech and p_val == 1:
-                # Fuzzy match for a technical term.
                 import difflib
                 from algorithms import super_clean
                 s_fp = super_clean(script_raw)
                 c_fp = super_clean(combo_text)
                 if s_fp and c_fp:
                     ratio = difflib.SequenceMatcher(None, s_fp, c_fp).ratio()
-                    if ratio >= 0.85 and script_digits == combo_digits:
-                        should_autocorrect = True
-                        
+                    is_path = '/' in script_raw or '\\' in script_raw
+                    if is_path:
+                        if ratio >= 0.75:
+                            should_autocorrect = True
+                    else:
+                        if ratio >= 0.85 and script_digits == combo_digits:
+                            should_autocorrect = True
+                            
             if should_autocorrect:
                 merged['text'] = script_raw
-                # Force status to normal
                 merged['status'] = None
                 merged['is_auto'] = False
                 merged['algo_status'] = None
             
-            # Replace the group of words with the merged word
+            # Replace the group of words (or single word) with the processed word
             self.words_data[first_real:last_real+1] = [merged]
 
 
