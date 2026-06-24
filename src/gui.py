@@ -8361,9 +8361,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         if hasattr(self, 'welcome_script_edit') and hasattr(self, 'text_script'):
             def sync_scripts(source, target):
                 if source.toPlainText() != target.toPlainText():
-                    target.blockSignals(True)
                     target.setText(source.toPlainText())
-                    target.blockSignals(False)
             
             self.welcome_script_edit.textChanged.connect(lambda: sync_scripts(self.welcome_script_edit, self.text_script))
             self.text_script.textChanged.connect(lambda: sync_scripts(self.text_script, self.welcome_script_edit))
@@ -9350,7 +9348,14 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             
         analysis_time = ""
         if hasattr(self, 'lbl_analysis_duration') and self.lbl_analysis_duration.isVisible():
-            analysis_time = self.lbl_analysis_duration.text()
+            analysis_time = getattr(self, '_last_analysis_time_raw', None)
+            if not analysis_time:
+                import re
+                time_match = re.search(r'\d+:\d+', self.lbl_analysis_duration.text())
+                if time_match:
+                    analysis_time = time_match.group(0)
+                else:
+                    analysis_time = self.lbl_analysis_duration.text()
             
         data_packet = {
             "words_data":     clean_words,
@@ -9407,7 +9412,18 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             # --- Restore Analysis Time ---
             analysis_time = state.get('analysis_time', "")
             if analysis_time and hasattr(self, 'lbl_analysis_duration'):
-                self.lbl_analysis_duration.setText(analysis_time)
+                import re
+                time_match = re.search(r'\d+:\d+', analysis_time)
+                if time_match:
+                    raw_time = time_match.group(0)
+                else:
+                    raw_time = analysis_time
+                self._last_analysis_time_raw = raw_time
+                
+                if raw_time and raw_time[0].isdigit():
+                    self.lbl_analysis_duration.setText(self.txt("txt_analyzed_in").replace("{time}", raw_time))
+                else:
+                    self.lbl_analysis_duration.setText(analysis_time)
                 self.lbl_analysis_duration.setVisible(True)
 
             # --- Restore SBS Cache ---
@@ -11238,7 +11254,8 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             elapsed = int(time.time() - self._transcription_start_time)
             mins = elapsed // 60
             secs = elapsed % 60
-            self.lbl_analysis_duration.setText(self.txt("txt_analyzed_in").replace("{time}", f"{mins}:{secs:02d}"))
+            self._last_analysis_time_raw = f"{mins}:{secs:02d}"
+            self.lbl_analysis_duration.setText(self.txt("txt_analyzed_in").replace("{time}", self._last_analysis_time_raw))
             self.lbl_analysis_duration.setVisible(True)
 
 
