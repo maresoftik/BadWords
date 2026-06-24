@@ -713,7 +713,7 @@ class CompareEngine(CompareEngineBase):
                                         is_fuzzy = True
                                         best_s_fuzzy = k
 
-                len_bonus = min(len(s_word), 20) * 0.5
+                len_bonus = len(s_word) * 2.0
                 score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 10.0 + len_bonus if is_exact else -999999.0
                 if best_k_exact > 0: score_exact += best_k_exact * 2.0
                 if best_s_exact > 0: score_exact += best_s_exact * 2.0
