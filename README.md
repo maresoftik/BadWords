@@ -54,15 +54,16 @@ BadWords does **80% of the tedious work for you** (cutting tight silences, marki
 Version 3.1 is a huge step up. I spent a lot of time rewriting how the analysis actually works and adding things that make using the app a lot less annoying. Here is what I managed to build:
 
 * **Standalone Analysis:** You no longer need a base script! BadWords can now just scan your raw audio and figure out where you stuttered, had false starts, or corrected yourself.
-* **Smarter Compare Algorithm:** Before, if you repeated a line 3 times, it would color all 3. I rewrote the logic so it now *only* marks the bad takes, leaving your final, good take completely clean.
-* **Side-By-Side View (Beta):** I added a new mode where you can view your original script and the transcript right next to each other. It makes checking for mistakes way faster.
+* **Smarter Compare Algorithm:** The "Compare to Script" algorithm has been completely rewritten. It now uses a complex Dynamic Programming engine. It takes a bit longer to calculate, but the matching precision is vastly superior.
+* **Side-By-Side View (Stable):** Now fully stable and more readable. Click synchronization and "Jump to Word" in DaVinci work flawlessly without losing focus or dropping marks.
+* **More Accurate Transcription Mode:** BadWords can now scrape technical terms from your original script and feed them to Whisper before transcribing. This drastically reduces hallucinations on technical videos.
 * **Advanced Settings Unlocked:** I opened up the engine. You can now tweak the AI thresholds, change chunking settings, and manage file paths directly in the UI if you want to experiment.
-* **Quality of Life:**
-  * **CTRL + Click:** You can now hold CTRL and click on a word to instantly jump to it.
-  * **Direct Feedback:** I added a Support tab so you can message me or report bugs directly from the app instead of having to go to GitHub/Reddit or emailing me.
-  * **Info:** Added transcription time stats and helpful tooltips across the UI to explain what different settings actually do.
-* **Bug Fixes & Tweaks:** I fixed a few things under the hood and made both the installer and the app much more robust, so it should now run smoother even on more specific setups. Also, a huge thank you for all the bug reports and feedback you guys have been sending me via email and Reddit!
-
+* **Quality of Life & Fixes:**
+  * **Broom Icon:** Added a quick button to wipe out all color marks from your transcript.
+  * **Mac M4 Fix:** Patched a critical issue with newer Apple Silicon CPUs getting stuck on initialization.
+  * **Project Saves:** Fixed exporting and importing projects to prevent crashes.
+  * **Taskbar Icon Fix:** The app icon no longer vanishes randomly on Windows.
+  * **Contact Tab:** Changed the "Support" tab to "Contact" to make it clearer where to send feedback.
 
 ---
 
