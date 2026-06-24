@@ -20,7 +20,7 @@ import platform
 # ==========================================
 APP_NAME = "BadWords"
 VERSION = "3.1.0"
-SUPPORT_WEBHOOK_URL = "https://discord.com/api/webhooks/1518008475979087913/He5i09a5Q5LSuRp6r2cCtKio4OYMcPGUWTmMdOo8RfyLrrYSYGl6WbV9DHCq5PbhGzSx"
+SUPPORT_WEBHOOK_URL = "http://frog02.mikr.us:41385/"
 POSTHOG_API_KEY = "phc_NRFaTKhPJJE8cBa3o9gXYo2mlktR5qup5tn7PdxuRsr"
 POSTHOG_HOST = "https://eu.i.posthog.com"
 
