@@ -652,6 +652,7 @@ SUPPORTED_LANGS = {
 }
 TRANS = {
     'en': {
+        "lbl_script": "Script",
         "tt_audio_sync_offset": "Shifts all transcript timestamps. Negative values (-0.05) make words start slightly earlier.",
         "tt_audio_sync_pad": "Adds extra duration to the end of each word. Prevents trailing sounds from being cut off.",
         "tt_audio_sync_snap": "Maximum allowed gap between two words to merge them into a single continuous segment.",
@@ -1010,11 +1011,14 @@ TRANS = {
         "update_notify_btn_dismiss": "Don't notify me again",
         "lbl_ultra_precise": "Ultra Precise Mode (Chunking)",
         "tt_ultra_precise": "Can greatly improve transcription precision even on weaker\nmodels, catching every stutter, hesitation and repetition\nverbatim. This mode is HIGHLY recommended despite the increased\nanalysis time. Especially recommended for longer recordings\nwhere standard mode tends to skip or merge small details.\n\nNote: This option can take noticeably more time to process,\ndepending on your hardware and platform\n(GPU acceleration is only available on NVIDIA)",
+        "lbl_more_accurate": "More accurate transcription",
+        "tt_more_accurate": "This option allows you to paste/import a script before transcription.\nKeywords are extracted from this script and fed to Whisper (the audio\ntranscription model), making the transcription more accurate.\n\nThis option is highly recommended for strictly technical scripts containing\nmany words with non-phonetic spellings (e.g., system paths, names with\nnumbers, special characters, etc.).\n\nAdditionally, this option automatically runs the transcript-script comparison\nalgorithm, so after transcription is complete, colors are immediately\nvisible, and the Side-by-side view loads instantly.",
         "tt_jump_to_word_info": "Jumps the DaVinci playhead to the exact moment the clicked word was spoken.\n\nAvailable shortcuts:\nCTRL/ALT/SHIFT + Left/Right Click.",        "ph_support_email": "Your Email Address (Optional)",
         "btn_copy_path": "Copy Path",
 
     },
     'pl': {
+        "lbl_script": "Scenariusz",
         "tt_audio_sync_offset": "Przesuwa wszystkie znaczniki czasu w transkrypcji. Wartości ujemne (-0.05) sprawiają, że słowa zaczynają się nieco wcześniej.",
         "tt_audio_sync_pad": "Wydłuża czas trwania każdego słowa. Zapobiega ucinaniu końcówek wyrazów.",
         "tt_audio_sync_snap": "Maksymalna przerwa między dwoma słowami pozwalająca na połączenie ich w jeden ciągły segment.",
@@ -1326,7 +1330,7 @@ TRANS = {
         "lbl_standalone_silence_workspace": "Przestrzeń Prostego Wykrywania Ciszy",
         "msg_standalone_silence": "Wykrywanie Ciszy",
         "msg_standalone_silence_processing_c": "Wykrywanie ciszy zakończone.",
-        "btn_run_standalone_silence": "Uruchom Wykrywanie",
+        "btn_run_standalone_silence": "Wykryj",
         "txt_initializing_standalone_silence": "Inicjalizacja Wykrywania Ciszy...",
         "msg_no_timelines_detected": "Nie wykryto osi czasu",
         "msg_no_audio_tracks_detected": "Nie wykryto ścieżek dźwiękowych",
@@ -1373,11 +1377,14 @@ TRANS = {
         "update_notify_btn_dismiss": "Nie powiadamiaj mnie więcej",
         "lbl_ultra_precise": "Tryb Ultra Precyzyjny (Chunking)",
         "tt_ultra_precise": "Znacznie poprawia precyzję transkrypcji, nawet na słabszych\nmodelach, wyłapując każde zająknięcie, zawahanie i powtórzenie\nsłowo w słowo. Jest to tryb BARDZO zalecany mimo wydłużenia\nczasu analizy. Szczególnie zalecane dla dłuższych nagrań,\ngdzie standardowy tryb może pomijać lub łączyć drobne detale.\n\nUwaga: Ta opcja może odczuwalnie wydłużyć czas przetwarzania,\nw zależności od twojego sprzętu i systemu operacyjnego\n(akceleracja GPU jest dostępna tylko dla kart NVIDIA).",
+        "lbl_more_accurate": "Dokładniejszy transkrypt",
+        "tt_more_accurate": "Opcja ta pozwala na wklejenie/zaimportowanie scenariusza przed transkrypcją,\nz tego scenariusza wyciągane są słowa kluczowe, które następnie są podawane\ndo Whispera, czyli modelu transkrybującego audio, dzięki czemu transkrypcja\nmoże być bardziej dokładna.\n\nTa opcja jest szczególnie polecana do scenariuszy stricte technicznych,\nzawierających wiele słów, których zapis jest inny niż fonetyczny\n(czyli np. ścieżki systemowe, nazwy z cyframi, znaki specjalne itd.).\n\nDodatkowo ta opcja samoczynnie przechodzi przez algorytm porównywania\ntranskryptu ze scenariuszem, więc po zakończonej transkrypcji kolory są\nwidoczne od razu, a widok Side-by-side załadowuje się natychmiastowo.",
         "tt_jump_to_word_info": "Skacze kursorem (playhead) DaVinci do momentu, w którym kliknięte słowo zostało wypowiedziane w audio.\n\nDostępne skróty:\nCTRL/ALT/SHIFT + Lewy/Prawy Przycisk Myszy.",        "ph_support_email": "Twój adres e-mail (Opcjonalnie)",
         "btn_copy_path": "Kopiuj ścieżkę",
 
     },
     'de': {
+        "lbl_script": "Skript",
         "tt_audio_sync_offset": "Verschiebt alle Zeitstempel des Transkripts. Negative Werte (-0.05) lassen Wörter etwas früher beginnen.",
         "tt_audio_sync_pad": "Fügt jedem Wort am Ende zusätzliche Dauer hinzu. Verhindert das Abschneiden von Endlauten.",
         "tt_audio_sync_snap": "Maximal zulässige Lücke zwischen zwei Wörtern, um sie zu einem durchgehenden Segment zu verbinden.",
@@ -1736,11 +1743,14 @@ TRANS = {
         "update_notify_btn_dismiss": "Nicht mehr benachrichtigen",
         "lbl_ultra_precise": "Ultra-Präzisionsmodus (Chunking)",
         "tt_ultra_precise": "Kann die Transkriptionspräzision selbst auf schwächeren\nModellen erheblich verbessern, fängt jedes Stottern, Zögern\nund Wiederholen wortwörtlich ein. Dieser Modus wird SEHR empfohlen,\nobwohl sich die Analysezeit verlängert. Besonders empfohlen für längere\nAufnahmen, bei denen der Standardmodus dazu neigt, kleine Details\nzu überspringen oder zu verschmelzen.\n\nHinweis: Diese Option kann spürbar mehr Verarbeitungszeit beanspruchen,\nabhängig von deiner Hardware und Plattform\n(GPU-Beschleunigung ist nur auf NVIDIA verfügbar).",
+        "lbl_more_accurate": "Genauere Transkription",
+        "tt_more_accurate": "Mit dieser Option können Sie vor der Transkription ein Skript einfügen/importieren.\nSchlüsselwörter werden aus diesem Skript extrahiert und dann an Whisper\n(das Audio-Transkriptionsmodell) übergeben, wodurch die Transkription genauer wird.\n\nDiese Option wird besonders für rein technische Skripte empfohlen, die viele Wörter\nmit nicht-phonetischer Schreibweise enthalten (z. B. Systempfade, Namen mit\nZahlen, Sonderzeichen usw.).\n\nZusätzlich führt diese Option automatisch den Transkript-Skript-Vergleichsalgorithmus aus,\nsodass nach Abschluss der Transkription die Farben sofort sichtbar sind und die\nSide-by-Side-Ansicht sofort geladen wird.",
         "tt_jump_to_word_info": "Springt mit dem DaVinci-Playhead genau an den Moment, an dem das angeklickte Wort gesprochen wurde.\n\nVerfügbare Tastenkürzel:\nSTRG/ALT/UMSCHALT + Links-/Rechtsklick.",        "ph_support_email": "Ihre E-Mail-Adresse (Optional)",
         "btn_copy_path": "Pfad kopieren",
 
     },
     'es': {
+        "lbl_script": "Guion",
         "tt_audio_sync_offset": "Desplaza todas las marcas de tiempo. Los valores negativos (-0.05) hacen que las palabras comiencen un poco antes.",
         "tt_audio_sync_pad": "Añade duración adicional al final de cada palabra. Evita que los sonidos finales se corten.",
         "tt_audio_sync_snap": "Brecha máxima permitida entre dos palabras para fusionarlas en un solo segmento continuo.",
@@ -2099,11 +2109,14 @@ TRANS = {
         "update_notify_btn_dismiss": "No volver a notificarme",
         "lbl_ultra_precise": "Modo Ultra Preciso (Chunking)",
         "tt_ultra_precise": "Puede mejorar enormemente la precisión de la transcripción incluso en modelos\nmás débiles, capturando cada tartamudeo, vacilación y repetición de\nforma literal. Este modo es MUY recomendado a pesar del aumento\nen el tiempo de análisis. Especialmente recomendado para grabaciones largas\ndonde el modo estándar tiende a omitir o fusionar pequeños detalles.\n\nNota: Esta opción puede tomar notablemente más tiempo de procesamiento,\ndependiendo de tu hardware y plataforma\n(la aceleración por GPU solo está disponible en NVIDIA).",
+        "lbl_more_accurate": "Transcripción más precisa",
+        "tt_more_accurate": "Esta opción le permite pegar/importar un guión antes de la transcripción.\nSe extraen palabras clave de este guión y luego se introducen en Whisper\n(el modelo de transcripción de audio), haciendo que la transcripción sea más precisa.\n\nEsta opción es muy recomendada para guiones estrictamente técnicos que\ncontienen muchas palabras con ortografía no fonética (por ejemplo, rutas de\nsistema, nombres con números, caracteres especiales, etc.).\n\nAdemás, esta opción ejecuta automáticamente el algoritmo de comparación de\ntranscripción y guión, por lo que una vez completada la transcripción, los colores\nson visibles de inmediato y la vista de lado a lado se carga al instante.",
         "tt_jump_to_word_info": "Salta el cabezal de reproducción de DaVinci al momento exacto en que se pronunció la palabra clickeada.\n\nAtajos disponibles:\nCTRL/ALT/MAYÚS + Clic Izquierdo/Derecho.",        "ph_support_email": "Tu correo electrónico (Opcional)",
         "btn_copy_path": "Copiar ruta",
 
     },
     'fr': {
+        "lbl_script": "Scénario",
         "tt_audio_sync_offset": "Décale tous les horodatages. Les valeurs négatives (-0.05) font commencer les mots un peu plus tôt.",
         "tt_audio_sync_pad": "Ajoute une durée supplémentaire à la fin de chaque mot. Empêche les sons finaux d'être coupés.",
         "tt_audio_sync_snap": "Écart maximum autorisé entre deux mots pour les fusionner en un seul segment continu.",
@@ -2462,11 +2475,14 @@ TRANS = {
         "update_notify_btn_dismiss": "Ne plus m'avertir",
         "lbl_ultra_precise": "Mode Ultra Précis (Chunking)",
         "tt_ultra_precise": "Peut grandement améliorer la précision de la transcription même sur des\nmodèles plus faibles, capturant chaque bégaiement, hésitation et répétition\nmot pour mot. Ce mode est TRÈS recommandé malgré l'augmentation\ndu temps d'analyse. Particulièrement recommandé pour les longs enregistrements\noù le mode standard a tendance à ignorer ou fusionner les petits détails.\n\nRemarque : Cette option peut augmenter considérablement le temps de traitement,\nselon votre matériel et votre système d'exploitation\n(L'accélération GPU n'est disponible que sur NVIDIA).",
+        "lbl_more_accurate": "Transcription plus précise",
+        "tt_more_accurate": "Cette option vous permet de coller/importer un script avant la transcription.\nLes mots-clés sont extraits de ce script puis fournis à Whisper (le modèle de\ntranscription audio), rendant la transcription plus précise.\n\nCette option est fortement recommandée pour les scripts strictement techniques\ncontenant de nombreux mots avec des orthographes non phonétiques (ex. chemins\nsystème, noms avec des chiffres, caractères spéciaux, etc.).\n\nDe plus, cette option exécute automatiquement l'algorithme de comparaison\ntranscription-script, ainsi, après la fin de la transcription, les couleurs sont\nimmédiatement visibles et la vue côte à côte se charge instantanément.",
         "tt_jump_to_word_info": "Déplace la tête de lecture de DaVinci au moment exact où le mot cliqué a été prononcé.\n\nRaccourcis disponibles :\nCTRL/ALT/MAJ + Clic Gauche/Droit.",        "ph_support_email": "Votre adresse e-mail (Facultatif)",
         "btn_copy_path": "Copier le chemin",
 
     },
     'it': {
+        "lbl_script": "Copione",
         "tt_audio_sync_offset": "Sposta tutti i timestamp. I valori negativi (-0.05) fanno iniziare le parole un po' prima.",
         "tt_audio_sync_pad": "Aggiunge una durata extra alla fine di ogni parola. Evita che i suoni finali vengano tagliati.",
         "tt_audio_sync_snap": "Spazio massimo consentito tra due parole per unirle in un unico segmento continuo.",
@@ -2825,11 +2841,14 @@ TRANS = {
         "update_notify_btn_dismiss": "Non avvisarmi più",
         "lbl_ultra_precise": "Modalità Ultra Precisa (Chunking)",
         "tt_ultra_precise": "Può migliorare notevolmente la precisione della trascrizione anche su modelli\npiù deboli, catturando letteralmente ogni balbuzie, esitazione e ripetizione.\nQuesta modalità è ALTAMENTE raccomandata nonostante l'aumento\ndel tempo di analisi. Particolarmente consigliato per le registrazioni più lunghe\ndove la modalità standard tende a saltare o unire i piccoli dettagli.\n\nNota: Questa opzione può richiedere molto più tempo per l'elaborazione,\na seconda dell'hardware e della piattaforma\n(l'accelerazione GPU è disponibile solo su NVIDIA).",
+        "lbl_more_accurate": "Trascrizione più accurata",
+        "tt_more_accurate": "Questa opzione ti consente di incollare/importare uno script prima della trascrizione.\nLe parole chiave vengono estratte da questo script e poi fornite a Whisper (il modello\ndi trascrizione audio), rendendo la trascrizione più accurata.\n\nQuesta opzione è altamente raccomandata per script strettamente tecnici contenenti\nmolte parole con ortografia non fonetica (es. percorsi di sistema, nomi con\nnumeri, caratteri speciali, ecc.).\n\nInoltre, questa opzione esegue automaticamente l'algoritmo di confronto\ntrascrizione-script, quindi, una volta completata la trascrizione, i colori sono\nImmediatamente visibili e la visualizzazione affiancata si carica all'istante.",
         "tt_jump_to_word_info": "Sposta il cursore di riproduzione di DaVinci nel momento esatto in cui è stata pronunciata la parola cliccata.\n\nScorciatoie disponibili:\nCTRL/ALT/MAIUSC + Clic Sinistro/Destro.",        "ph_support_email": "Il tuo indirizzo email (Opzionale)",
         "btn_copy_path": "Copia percorso",
 
     },
     'pt': {
+        "lbl_script": "Roteiro",
         "tt_audio_sync_offset": "Desloca todos os timestamps. Valores negativos (-0.05) fazem as palavras começarem um pouco mais cedo.",
         "tt_audio_sync_pad": "Adiciona duração extra ao final de cada palavra. Evita que os sons finais sejam cortados.",
         "tt_audio_sync_snap": "Espaço máximo permitido entre duas palavras para fundi-las num único segmento contínuo.",
@@ -3188,11 +3207,14 @@ TRANS = {
         "update_notify_btn_dismiss": "Não me notificar novamente",
         "lbl_ultra_precise": "Modo Ultra Preciso (Chunking)",
         "tt_ultra_precise": "Pode melhorar bastante a precisão da transcrição, mesmo em modelos\nmais fracos, capturando cada gagueira, hesitação e repetição\ntextualmente. Este modo é ALTAMENTE recomendado, apesar do aumento\ndo tempo de análise. Especialmente recomendado para gravações mais longas\nonde o modo padrão tende a pular ou mesclar pequenos detalhes.\n\nNota: Esta opção pode levar visivelmente mais tempo para processar,\ndependendo do seu hardware e plataforma\n(a aceleração por GPU só está disponível na NVIDIA).",
+        "lbl_more_accurate": "Transcrição mais precisa",
+        "tt_more_accurate": "Esta opção permite colar/importar um roteiro antes da transcrição.\nPalavras-chave são extraídas deste roteiro e depois fornecidas ao Whisper\n(o modelo de transcrição de áudio), tornando a transcrição mais precisa.\n\nEsta opção é altamente recomendada para roteiros estritamente técnicos contendo\nmuitas palavras com grafias não fonéticas (ex., caminhos de sistema, nomes\ncom números, caracteres especiais, etc.).\n\nAlém disso, esta opção executa automaticamente o algoritmo de comparação\ntranscrição-roteiro, então, após a conclusão da transcrição, as cores são\nimediatamente visíveis e a visualização lado a lado carrega instantaneamente.",
         "tt_jump_to_word_info": "Salta o cursor do DaVinci para o momento exato em que a palavra clicada foi dita.\n\nAtalhos disponíveis:\nCTRL/ALT/SHIFT + Clique Esquerdo/Direito.",        "ph_support_email": "Seu endereço de e-mail (Opcional)",
         "btn_copy_path": "Copiar caminho",
 
     },
     'nl': {
+        "lbl_script": "Script",
         "tt_audio_sync_offset": "Verschuift alle tijdstempels. Negatieve waarden (-0.05) laten woorden iets eerder beginnen.",
         "tt_audio_sync_pad": "Voegt extra duur toe aan het einde van elk woord. Voorkomt dat eindklanken worden afgekapt.",
         "tt_audio_sync_snap": "Maximaal toegestane opening tussen twee woorden om ze samen te voegen tot één doorlopend segment.",
@@ -3551,11 +3573,14 @@ TRANS = {
         "update_notify_btn_dismiss": "Niet meer waarschuwen",
         "lbl_ultra_precise": "Ultra-precisiemodus (Chunking)",
         "tt_ultra_precise": "Kan de transcriptieprecisie sterk verbeteren, zelfs op zwakkere\nmodellen, pikt elke stottering, aarzeling en herhaling\nwoordelijk op. Deze modus wordt TEN ZEERSTE aanbevolen, ondanks de\nlangere analysetijd. Vooral aanbevolen voor langere opnames\nwaar de standaardmodus kleine details overslaat of samenvoegt.\n\nLet op: Deze optie kan aanzienlijk meer verwerkingstijd in beslag nemen,\nafhankelijk van je hardware en platform\n(GPU-versnelling is alleen beschikbaar op NVIDIA).",
+        "lbl_more_accurate": "Nauwkeurigere transcriptie",
+        "tt_more_accurate": "Met deze optie kun je voor de transcriptie een script plakken/importeren.\nSleutelwoorden worden uit dit script gehaald en aan Whisper (het audiotranscriptiemodel)\ngeleverd, waardoor de transcriptie nauwkeuriger wordt.\n\nDeze optie wordt ten zeerste aanbevolen voor strikt technische scripts die veel\nwoorden bevatten met een niet-fonetische spelling (bijv. systeempaden, namen met\ncijfers, speciale tekens, enz.).\n\nBovendien voert deze optie automatisch het algoritme voor vergelijking van\ntranscript en script uit, dus na voltooiing van de transcriptie zijn de kleuren\nonmiddellijk zichtbaar en laadt de Side-by-side-weergave direct.",
         "tt_jump_to_word_info": "Springt met de DaVinci-afspeelkop precies naar het moment waarop het geklikte woord werd uitgesproken.\n\nBeschikbare sneltoetsen:\nCTRL/ALT/SHIFT + Linker/Rechter Muisklik.",        "ph_support_email": "Jouw e-mailadres (Optioneel)",
         "btn_copy_path": "Pad kopiëren",
 
     },
     'uk': {
+        "lbl_script": "Сценарій",
         "tt_audio_sync_offset": "Зсуває всі мітки часу транскрипту. Від'ємні значення (-0.05) роблять початок слів трохи раніше.",
         "tt_audio_sync_pad": "Додає додатковий час до кінця кожного слова. Запобігає обрізанню кінцевих звуків.",
         "tt_audio_sync_snap": "Максимально допустимий проміжок між двома словами для їх об'єднання в єдиний безперервний сегмент.",
@@ -3914,11 +3939,14 @@ TRANS = {
         "update_notify_btn_dismiss": "Більше не сповіщати",
         "lbl_ultra_precise": "Ультраточний режим (Chunking)",
         "tt_ultra_precise": "Може значно покращити точність транскрипції навіть на слабших\nмоделях, дослівно фіксуючи кожне заїкання, вагання та повторення.\nЦей режим ДУЖЕ рекомендується, незважаючи на збільшення часу\nаналізу. Особливо рекомендується для довших записів, де стандартний\nрежим має схильність пропускати або об'єднувати дрібні деталі.\n\nПримітка: Ця опція може помітно збільшити час обробки,\nзалежно від вашого обладнання та платформи\n(GPU-прискорення доступне лише на NVIDIA).",
+        "lbl_more_accurate": "Більш точна транскрипція",
+        "tt_more_accurate": "Ця опція дозволяє вставити/імпортувати сценарій перед транскрипцією.\nКлючові слова витягуються з цього сценарію, а потім передаються в Whisper\n(модель транскрипції аудіо), що робить транскрипцію точнішою.\n\nЦя опція настійно рекомендується для суто технічних сценаріїв, що містять\nбагато слів з нефонетичним написанням (наприклад, системні шляхи, назви\nз цифрами, спеціальні символи тощо).\n\nКрім того, ця опція автоматично запускає алгоритм порівняння транскрипту\nзі сценарієм, тому після завершення транскрипції кольори відразу видно,\nа вигляд Side-by-side завантажується миттєво.",
         "tt_jump_to_word_info": "Переміщує курсор (playhead) DaVinci на точний момент, коли було вимовлено вибране слово.\n\nДоступні комбінації:\nCTRL/ALT/SHIFT + Лівий/Правий клік.",        "ph_support_email": "Ваша електронна адреса (необов'язково)",
         "btn_copy_path": "Копіювати шлях",
 
     },
     'ru': {
+        "lbl_script": "Сценарий",
         "tt_audio_sync_offset": "Сдвигает все таймкоды. Отрицательные значения (-0.05) заставляют слова начинаться немного раньше.",
         "tt_audio_sync_pad": "Добавляет дополнительную длительность в конец каждого слова. Предотвращает обрезание окончаний.",
         "tt_audio_sync_snap": "Максимально допустимый разрыв между двумя словами для их объединения в один непрерывный сегмент.",
@@ -4277,6 +4305,8 @@ TRANS = {
         "update_notify_btn_dismiss": "Больше не предупреждать",
         "lbl_ultra_precise": "Ультраточний режим (Chunking)",
         "tt_ultra_precise": "Может значительно улучшить точность транскрипции даже на слабых\nмоделях, дословно фиксируя каждое заикание, колебание и повторение.\nЭтот режим ОЧЕНЬ рекомендуется, несмотря на увеличение времени\nанализа. Особенно рекомендуется для длинных записей, где стандартный\nрежим может пропускать или объединять мелкие детали.\n\nПримечание: Эта опция может заметно увеличить время обработки\nв зависимости от вашего оборудования и платформы\n(GPU-ускорение доступно только на NVIDIA).",
+        "lbl_more_accurate": "Более точная транскрипция",
+        "tt_more_accurate": "Эта опция позволяет вставить/импортировать сценарий перед транскрипцией.\nКлючевые слова извлекаются из этого сценария и затем передаются в Whisper\n(модель транскрипции аудио), делая транскрипцию более точной.\n\nЭта опция настоятельно рекомендуется для строго технических сценариев, содержащих\nмного слов с нефонетическим написанием (например, системные пути, названия с\nцифрами, специальные символы и т. д.).\n\nКроме того, эта опция автоматически запускает алгоритм сравнения транскрипта\nсо сценарием, поэтому после завершения транскрипции цвета сразу видны,\nа вид Side-by-side загружается мгновенно.",
         "tt_jump_to_word_info": "Перемещает курсор (playhead) DaVinci на точный момент, когда было произнесено выбранное слово.\n\nДоступные сочетания:\nCTRL/ALT/SHIFT + Левый/Правый клик.",        "ph_support_email": "Ваш адрес электронной почты (необязательно)",
         "btn_copy_path": "Копировать путь",
 

@@ -8357,6 +8357,19 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self.activities = {}
         self.active_activity = None
         self._build_activities()
+        
+        if hasattr(self, 'welcome_script_edit') and hasattr(self, 'text_script'):
+            def sync_scripts(source, target):
+                if source.toPlainText() != target.toPlainText():
+                    target.blockSignals(True)
+                    target.setText(source.toPlainText())
+                    target.blockSignals(False)
+            
+            self.welcome_script_edit.textChanged.connect(lambda: sync_scripts(self.welcome_script_edit, self.text_script))
+            self.text_script.textChanged.connect(lambda: sync_scripts(self.text_script, self.welcome_script_edit))
+            if self.text_script.toPlainText():
+                self.welcome_script_edit.setText(self.text_script.toPlainText())
+
 
         # Splitter layout for panels and stack
         self._main_h_splitter = GripSplitter(Qt.Horizontal)
@@ -10051,6 +10064,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
           - sub-page 0: Transcription workflow (existing dropdowns + Analyze button)
           - sub-page 1: Fast Silence settings + Run button
         """
+        prefs = self.engine.load_preferences() or {}
         page = QWidget()
         page.setObjectName("page_welcome")
         page.setStyleSheet(f"QWidget#page_welcome {{ background-color: {config.BG_COLOR}; }}")
@@ -10062,7 +10076,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
 
         inner = QWidget()
         inner.setObjectName("welcome_inner")
-        inner.setFixedWidth(340)
+        # Removing fixed width to allow the entire mass to be centered
         inner.setStyleSheet("QWidget#welcome_inner { background: transparent; }")
 
         inner_layout = QVBoxLayout(inner)
@@ -10100,9 +10114,10 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(3)
             lbl = QLabel(label_text)
+            lbl.setFixedHeight(16)
             lbl.setStyleSheet(
                 f"color: {config.NOTE_COL}; font-size: 9pt;"
-                f" font-family: '{config.UI_FONT_NAME}'; background: transparent;"
+                f" font-family: '{config.UI_FONT_NAME}'; background: transparent; padding: 0;"
             )
             row.addWidget(lbl)
             row.addWidget(widget)
@@ -10111,7 +10126,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         p_transcription = QWidget()
         p_transcription.setStyleSheet("background: transparent;")
         l_trans = QVBoxLayout(p_transcription)
-        l_trans.setContentsMargins(10, 0, 10, 0)
+        l_trans.setContentsMargins(0, 0, 0, 0)
         l_trans.setSpacing(0)
         l_trans.setAlignment(Qt.AlignTop)
 
@@ -10125,6 +10140,23 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         l_trans.addWidget(lbl_sub)
         l_trans.addSpacing(20)
 
+        self.slider_widget = QWidget()
+        self.slider_widget.setStyleSheet("background: transparent;")
+        self.slider_layout = QHBoxLayout(self.slider_widget)
+        self.slider_layout.setContentsMargins(0, 0, 0, 0)
+        self.slider_layout.setSpacing(0)
+        self.slider_layout.setAlignment(Qt.AlignTop)
+        
+        self.settings_container = QWidget()
+        self.settings_container.setFixedWidth(310)
+        self.settings_container.setStyleSheet("background: transparent;")
+        self.settings_layout = QVBoxLayout(self.settings_container)
+        self.settings_layout.setContentsMargins(0, 0, 0, 0)
+        self.settings_layout.setSpacing(0)
+        self.settings_layout.setAlignment(Qt.AlignTop)
+        self.slider_layout.addWidget(self.settings_container)
+
+
         self.combo_tl_0 = CustomDropdown([])
         self.combo_tl_0.setFixedHeight(30)
         self.combo_tl_0.valueChanged.connect(
@@ -10134,9 +10166,10 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         _vbox_tl0.setContentsMargins(0, 0, 0, 0)
         _vbox_tl0.setSpacing(3)
         _lbl_tl0 = QLabel(self.txt("lbl_timeline_selection"))
+        _lbl_tl0.setFixedHeight(16)
         _lbl_tl0.setStyleSheet(
             f"color: {config.NOTE_COL}; font-size: 9pt;"
-            f" font-family: '{config.UI_FONT_NAME}'; background: transparent;"
+            f" font-family: '{config.UI_FONT_NAME}'; background: transparent; padding: 0;"
         )
         _hbox_tl0 = QHBoxLayout()
         _hbox_tl0.setContentsMargins(0, 0, 0, 0)
@@ -10155,13 +10188,13 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         _hbox_tl0.addWidget(_btn_ref_tl0)
         _vbox_tl0.addWidget(_lbl_tl0)
         _vbox_tl0.addLayout(_hbox_tl0)
-        l_trans.addLayout(_vbox_tl0)
-        l_trans.addSpacing(10)
+        self.settings_layout.addLayout(_vbox_tl0)
+        self.settings_layout.addSpacing(10)
 
         self.combo_tr_0 = MultiSelectDropdown([])
         self.combo_tr_0.setFixedHeight(30)
-        l_trans.addLayout(_row(self.txt("lbl_tracks_selection"), self.combo_tr_0))
-        l_trans.addSpacing(10)
+        self.settings_layout.addLayout(_row(self.txt("lbl_tracks_selection"), self.combo_tr_0))
+        self.settings_layout.addSpacing(10)
 
         # ── Language
         lang_items = list(config.SUPPORTED_LANGUAGES.values())
@@ -10172,8 +10205,8 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         placeholder = self.txt("lbl_choose_recording_language") if hasattr(self, 'txt') else "Choose recording language"
         self._combo_lang.setText(display_name if display_name in lang_items else placeholder)
         self._combo_lang.valueChanged.connect(lambda v: self.engine.save_preferences({"lang": v}))
-        l_trans.addLayout(_row(self.txt("lbl_lang"), self._combo_lang))
-        l_trans.addSpacing(10)
+        self.settings_layout.addLayout(_row(self.txt("lbl_lang"), self._combo_lang))
+        self.settings_layout.addSpacing(10)
 
         # ── Model
         model_items = [
@@ -10216,9 +10249,10 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         row_model_lbl.setContentsMargins(0, 0, 0, 0)
         row_model_lbl.setSpacing(5)
         lbl_model = QLabel(self.txt("lbl_model"))
+        lbl_model.setFixedHeight(16)
         lbl_model.setStyleSheet(
             f"color: {config.NOTE_COL}; font-size: 9pt;"
-            f" font-family: '{config.UI_FONT_NAME}'; background: transparent;"
+            f" font-family: '{config.UI_FONT_NAME}'; background: transparent; padding: 0;"
         )
         row_model_lbl.addWidget(lbl_model)
         row_model_lbl.addWidget(info_model)
@@ -10230,8 +10264,8 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         vbox_model.addLayout(row_model_lbl)
         vbox_model.addWidget(self._combo_model)
         
-        l_trans.addLayout(vbox_model)
-        l_trans.addSpacing(15)
+        self.settings_layout.addLayout(vbox_model)
+        self.settings_layout.addSpacing(15)
 
         # ── Ultra Precise Mode
         self.tgl_ultra_precise = ToggleSwitch()
@@ -10242,22 +10276,15 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         lbl_ultra.setStyleSheet(f"color: {config.FG_COLOR}; font-family: {config.UI_FONT_NAME}; font-size: 10pt;")
         
         info_ultra = QLabel()
-        _src_dir = os.path.dirname(os.path.abspath(__file__))
-        _prod_assets_dir = os.path.join(_src_dir, "layout")
-        _dev_assets_dir = os.path.join(os.path.dirname(_src_dir), "assets", "layout")
-        _assets_dir = _prod_assets_dir if os.path.exists(_prod_assets_dir) else _dev_assets_dir
-        info_icon_path = os.path.join(_assets_dir, "information.png")
         if os.path.exists(info_icon_path):
             info_ultra.setPixmap(QPixmap(info_icon_path).scaled(18, 18, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         else:
             info_ultra.setText("🛈")
             info_ultra.setStyleSheet("color: #888888; font-size: 11pt;")
-        # Wrap text in div to force word wrapping and prevent clipping, save to custom attribute
         tt_text = self.txt("tt_ultra_precise")
         info_ultra.custom_tooltip_text = f"<div style='max-width: 300px; white-space: pre-wrap;'>{tt_text}</div>"
         info_ultra.setCursor(Qt.WhatsThisCursor)
         
-        # Make tooltip appear instantly on hover, using the custom IDE tooltip
         def instant_tooltip(event):
             if hasattr(self, 'shared_tooltip'):
                 self.shared_tooltip.show_global(info_ultra.custom_tooltip_text, QCursor.pos())
@@ -10265,18 +10292,125 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         info_ultra.leaveEvent = lambda e: self.shared_tooltip.hide() if hasattr(self, 'shared_tooltip') else None
         
         row_ultra = QHBoxLayout()
-        row_ultra.setSpacing(12)  # Adds spacing between toggle and text
-        row_ultra.addWidget(self.tgl_ultra_precise)
+        row_ultra.setSpacing(0)
         row_ultra.addWidget(lbl_ultra)
-        row_ultra.addSpacing(-6)  # Bring the info icon a bit closer to text
-        row_ultra.addWidget(info_ultra)
         row_ultra.addStretch()
-        l_trans.addLayout(row_ultra)
-        l_trans.addSpacing(24)
+        row_ultra.addWidget(info_ultra)
+        row_ultra.addSpacing(6)
+        row_ultra.addWidget(self.tgl_ultra_precise)
+        
+        self.settings_layout.addLayout(row_ultra)
+        self.settings_layout.addSpacing(10)
+
+        # ── More Accurate Mode
+        self.tgl_more_accurate = ToggleSwitch()
+        is_more_accurate = prefs.get('ai_more_accurate', config.DEFAULT_SETTINGS.get('ai_more_accurate', False))
+        self.tgl_more_accurate.setChecked(is_more_accurate)
+        self.tgl_more_accurate.toggled.connect(self._on_more_accurate_toggled)
+        
+        lbl_acc = QLabel(self.txt("lbl_more_accurate"))
+        lbl_acc.setStyleSheet(f"color: {config.FG_COLOR}; font-family: {config.UI_FONT_NAME}; font-size: 10pt;")
+        
+        info_acc = QLabel()
+        if os.path.exists(info_icon_path):
+            info_acc.setPixmap(QPixmap(info_icon_path).scaled(18, 18, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        else:
+            info_acc.setText("🛈")
+            info_acc.setStyleSheet("color: #888888; font-size: 11pt;")
+        tt_acc_text = self.txt("tt_more_accurate")
+        info_acc.custom_tooltip_text = f"<div style='max-width: 350px; white-space: pre-wrap;'>{tt_acc_text}</div>"
+        info_acc.setCursor(Qt.WhatsThisCursor)
+        
+        def instant_tooltip_acc(event):
+            if hasattr(self, 'shared_tooltip'):
+                self.shared_tooltip.show_global(info_acc.custom_tooltip_text, QCursor.pos())
+        info_acc.enterEvent = instant_tooltip_acc
+        info_acc.leaveEvent = lambda e: self.shared_tooltip.hide() if hasattr(self, 'shared_tooltip') else None
+        
+        row_acc = QHBoxLayout()
+        row_acc.setSpacing(0)
+        row_acc.addWidget(lbl_acc)
+        row_acc.addStretch()
+        row_acc.addWidget(info_acc)
+        row_acc.addSpacing(6)
+        row_acc.addWidget(self.tgl_more_accurate)
+        
+        self.settings_layout.addLayout(row_acc)
+        self.settings_layout.addSpacing(24)
+
+        # ── Script Container
+        self.script_container = QWidget()
+        # 335 includes the 15px margin to prevent the right border from being cut off
+        self.script_container.setFixedWidth(335 if is_more_accurate else 0)
+        self.script_container.setStyleSheet("background: transparent;")
+        
+        self.script_container_layout = QHBoxLayout(self.script_container)
+        self.script_container_layout.setContentsMargins(15, 0, 0, 0)
+        # AlignRight ensures the text box moves properly to create the "slide out" effect
+        self.script_container_layout.setAlignment(Qt.AlignRight | Qt.AlignTop)
+        
+        self.script_content_widget = QWidget()
+        self.script_content_widget.setFixedWidth(320)
+        self.script_content_widget.setFixedHeight(297)
+        self.script_layout = QVBoxLayout(self.script_content_widget)
+        self.script_layout.setContentsMargins(0, 0, 0, 0)
+        self.script_layout.setSpacing(0)
+        
+        _lbl_script = QLabel(self.txt("lbl_script"))
+        _lbl_script.setFixedHeight(16)
+        _lbl_script.setStyleSheet(
+            f"color: {config.NOTE_COL}; font-size: 9pt;"
+            f" font-family: '{config.UI_FONT_NAME}'; background: transparent; padding: 0;"
+        )
+        self.script_layout.addWidget(_lbl_script)
+        self.script_layout.addSpacing(3)
+        
+        self.welcome_script_edit = QTextEdit()
+        self.welcome_script_edit.setFixedHeight(278)
+        self.welcome_script_edit.setAcceptRichText(False)
+        self.welcome_script_edit.setStyleSheet(f'''
+            QTextEdit {{
+                background-color: #1e1e1e; color: #d4d4d4; 
+                border: 1px solid #3a3a3a; border-radius: 3px; 
+                padding: 4px; outline: none; font-family: {config.UI_FONT_NAME};
+            }}
+            QTextEdit:focus {{ border: 1px solid #1a7a3e; }}
+        ''')
+        self.script_layout.addWidget(self.welcome_script_edit)
+        
+        self.btn_import_welcome_script = QPushButton(self.txt("btn_import_script"))
+        self.btn_import_welcome_script.setObjectName("btn_ghost")
+        self.btn_import_welcome_script.setCursor(Qt.PointingHandCursor)
+        self.btn_import_welcome_script.setFixedHeight(30)
+        self.btn_import_welcome_script.setStyleSheet(f"""
+            QPushButton#btn_ghost {{
+                background-color: #1e1e1e; color: {config.FG_COLOR};
+                font-family: {config.UI_FONT_NAME}; font-size: 10pt;
+                border: 1px solid #3a3a3a; border-radius: 3px; padding: 0 12px;
+            }}
+            QPushButton#btn_ghost:hover {{ background-color: #2a2d2e; }}
+            QPushButton#btn_ghost:pressed {{ background-color: #3a3d3e; }}
+        """)
+        self.btn_import_welcome_script.clicked.connect(self._on_import_script)
+        self.script_container_layout.addWidget(self.script_content_widget)
+        
+        self.slider_layout.addWidget(self.script_container)
+        
+        h_slider = QHBoxLayout()
+        h_slider.setContentsMargins(0, 0, 0, 0)
+        h_slider.addStretch()
+        h_slider.addWidget(self.slider_widget)
+        h_slider.addStretch()
+        l_trans.addLayout(h_slider)
+        
+        # Raise settings to ensure it overlaps during slide animation
+        self.settings_container.raise_()
+
 
         # ── Action buttons
         btn_row_t = QHBoxLayout()
-        btn_row_t.setSpacing(8)
+        btn_row_t.setContentsMargins(0, 0, 0, 0)
+        btn_row_t.setSpacing(0)
 
         btn_import = QPushButton(self.txt("btn_import_project"))
         btn_import.setObjectName("btn_ghost")
@@ -10308,8 +10442,25 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             QPushButton#btn_primary:pressed {{ background-color: #176e38; }}
         """)
         btn_analyze.clicked.connect(self._on_start_analysis)
+        btn_row_t.addSpacing(8)
         btn_row_t.addWidget(btn_analyze)
-        l_trans.addLayout(btn_row_t)
+        
+        self.btn_import_wrapper = QWidget()
+        wrapper_l = QHBoxLayout(self.btn_import_wrapper)
+        wrapper_l.setContentsMargins(8, 0, 0, 0)
+        wrapper_l.setSpacing(0)
+        wrapper_l.addWidget(self.btn_import_welcome_script)
+        btn_row_t.addWidget(self.btn_import_wrapper)
+        
+        self.btn_import_wrapper.setVisible(prefs.get('ai_more_accurate', config.DEFAULT_SETTINGS.get('ai_more_accurate', False)))
+        
+        btn_row_t_centered = QHBoxLayout()
+        btn_row_t_centered.setContentsMargins(0, 0, 0, 0)
+        btn_row_t_centered.addStretch()
+        btn_row_t_centered.addLayout(btn_row_t)
+        btn_row_t_centered.addStretch()
+        
+        l_trans.addLayout(btn_row_t_centered)
         l_trans.addSpacing(14)
 
         # ── Link to fast silence sub-page
@@ -10321,18 +10472,30 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         )
         btn_switch_fast.clicked.connect(lambda: self.welcome_stack.setCurrentIndex(1))
         l_trans.addWidget(btn_switch_fast, 0, Qt.AlignCenter)
-
+        l_trans.addStretch()
+        
         self.welcome_stack.addWidget(p_transcription)  # index 0
 
         # ═══════════════════════════════════════════════════════════════
         # SUB-PAGE 1: FAST SILENCE (clean layout, mirrors main page)
         # ═══════════════════════════════════════════════════════════════
+        p_fast_outer = QWidget()
+        p_fast_outer.setStyleSheet("background: transparent;")
+        p_fast_layout = QHBoxLayout(p_fast_outer)
+        p_fast_layout.setContentsMargins(0, 0, 0, 0)
+        p_fast_layout.setSpacing(0)
+        
         p_fast = QWidget()
+        p_fast.setFixedWidth(310)
         p_fast.setStyleSheet("background: transparent;")
         l_fast = QVBoxLayout(p_fast)
-        l_fast.setContentsMargins(10, 0, 10, 0)
+        l_fast.setContentsMargins(0, 0, 0, 0)
         l_fast.setSpacing(0)
         l_fast.setAlignment(Qt.AlignTop)
+        
+        p_fast_layout.addStretch()
+        p_fast_layout.addWidget(p_fast)
+        p_fast_layout.addStretch()
 
         # TITLE
         lbl_fs_title = QLabel(self.txt("lbl_standalone_silence_workspace"))
@@ -10490,6 +10653,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
 
         # RUN & BACK BUTTONS
         btn_row_fs = QHBoxLayout()
+        btn_row_fs.setContentsMargins(0, 0, 0, 0)
 
         # BACK BUTTON
         btn_back = QPushButton(f"← {self.txt('btn_back_to_transcription')}")
@@ -10521,7 +10685,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         l_fast.addLayout(btn_row_fs)
         l_fast.addStretch()
 
-        self.welcome_stack.addWidget(p_fast)   # index 1
+        self.welcome_stack.addWidget(p_fast_outer)   # index 1
 
         # ── Centre horizontally ──────────────────────────────────────────
         h = QHBoxLayout()
@@ -10706,6 +10870,48 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
     def _on_nav_analysis(self):
         """Navigate to the Analysis / Processing page."""
         self.go_to_page(1)
+
+    def _on_more_accurate_toggled(self, checked):
+        self.engine.save_preferences({"ai_more_accurate": checked})
+        if not hasattr(self, 'script_container'): return
+        
+        from PySide6.QtCore import QVariantAnimation, QEasingCurve
+        
+        has_btn = hasattr(self, 'btn_import_wrapper')
+        if has_btn:
+            # Temporarily un-restrict to measure natural width
+            self.btn_import_wrapper.setMaximumWidth(16777215)
+            btn_full_w = self.btn_import_wrapper.sizeHint().width()
+            start_btn_w = self.btn_import_wrapper.width() if self.btn_import_wrapper.isVisible() else 0
+            end_btn_w = btn_full_w if checked else 0
+            
+            if checked:
+                self.btn_import_wrapper.setMaximumWidth(start_btn_w)
+                self.btn_import_wrapper.setVisible(True)
+
+        self._script_anim = QVariantAnimation(self)
+        self._script_anim.setDuration(500)
+        self._script_anim.setStartValue(0.0)
+        self._script_anim.setEndValue(1.0)
+        self._script_anim.setEasingCurve(QEasingCurve.InOutCubic)
+        
+        start_w = self.script_container.width()
+        end_w = 335 if checked else 0
+        
+        def _on_step(v):
+            self.script_container.setFixedWidth(int(start_w + (end_w - start_w) * v))
+            if has_btn:
+                self.btn_import_wrapper.setMaximumWidth(int(start_btn_w + (end_btn_w - start_btn_w) * v))
+                
+        def _on_finish():
+            if has_btn:
+                if not checked:
+                    self.btn_import_wrapper.setVisible(False)
+                self.btn_import_wrapper.setMaximumWidth(16777215)
+                
+        self._script_anim.valueChanged.connect(_on_step)
+        self._script_anim.finished.connect(_on_finish)
+        self._script_anim.start()
 
     def _on_start_analysis(self):
         # ── Language validation ─────────────────────────────────────────────────
