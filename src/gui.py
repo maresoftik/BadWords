@@ -1625,12 +1625,6 @@ class TranscriptionCanvas(QWidget):
         self._cached_visible_words = []
 
     def load_data(self, words_data):
-        # Segment splitting: ensure words immediately following a silence start a new segment
-        if words_data:
-            for i in range(1, len(words_data)):
-                if words_data[i-1].get('type') == 'silence' and words_data[i].get('type') != 'silence':
-                    words_data[i]['is_segment_start'] = True
-        
         self.words_data = words_data
         self._calculate_layout()
         self.update()

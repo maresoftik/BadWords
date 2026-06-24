@@ -705,15 +705,18 @@ class CompareEngine(CompareEngineBase):
                 best_s_exact = 0
                 best_s_fuzzy = 0
                 
+                base_is_fuzzy = False
                 if s_word == t_word and s_word != "":
                     is_exact = True
                 else:
                     if s_len > 3 and len(t_word) > 3 and t_word in s_word:
                         is_fuzzy = True
+                        base_is_fuzzy = True
                     elif check_fuzzy(s_word, t_word):
                         is_fuzzy = True
+                        base_is_fuzzy = True
                         
-                    if s_word != "" and t_len < s_len and s_len > 3:
+                    if not base_is_fuzzy and s_word != "" and t_len < s_len and s_len > 3:
                         if t_first == s_first or t_last == s_last or (len(t_word) > 3 and t_word in s_word):
                             combo = t_word
                             for k in range(1, 12):
@@ -729,7 +732,7 @@ class CompareEngine(CompareEngineBase):
                                         is_fuzzy = True
                                         best_k_fuzzy = k
 
-                    if not is_exact and t_word != "" and s_len < t_len and t_len > 3:
+                    if not base_is_fuzzy and not is_exact and t_word != "" and s_len < t_len and t_len > 3:
                         if s_first == t_first or s_last == t_last or (len(s_word) > 3 and s_word in t_word):
                             combo_s = s_word
                             for k in range(1, 12):
@@ -881,10 +884,13 @@ class CompareEngine(CompareEngineBase):
                 self.mark_range(t_idx, t_idx, 'typo', is_auto=True)
             self._add_trace(t_idx, s_idx)
             
+        self.match_pairs = match_pairs
+        
         self.missing_script_indices.sort()
         self._phase_d_smart_fragment_fill()
         self._phase_e_fill_dp_gaps(match_pairs)
         self._phase_f_retake_detection(match_pairs)
+        self._phase_h_smooth_statuses(match_pairs)
         
         if self.algo_settings and self.algo_settings.get('run_phase_g', False):
             self._phase_g_merge_combos(match_pairs)
@@ -1183,7 +1189,7 @@ class CompareEngine(CompareEngineBase):
         for k in range(self.t_len):
             real_idx = self.trans_indices[k]
             w = self.words_data[real_idx]
-            if w.get('status') not in ('bad', 'repeat'):
+            if w.get('status') != 'repeat':
                 continue
             
             cur_time = w.get('start', 0) or 0
@@ -1213,6 +1219,77 @@ class CompareEngine(CompareEngineBase):
 
         # F.2b (Typo->Repeat Promotion) was removed because it aggressively bled blue color into valid green/red segments.
         # F.4 was removed because it aggressively suppressed valid 2-word errors.
+
+    def _phase_h_smooth_statuses(self, match_pairs):
+        """
+        Phase H: Semantic Status Cleanup.
+        Evaluates blocks of 'repeat' tokens. If a block has NO fuzzy match
+        with the nearby script window, it is a non-relevant filler and should
+        be downgraded to 'bad'.
+        """
+        import re, difflib
+        real_idx_to_s = {self.trans_indices[t]: s for t, s, p in match_pairs}
+        words = self.words_data
+
+        i = 0
+        while i < len(words):
+            w = words[i]
+            if w.get('status') == 'repeat' and w.get('type') != 'silence':
+                start = i
+                while i < len(words) and words[i].get('status') == 'repeat':
+                    i += 1
+                end = i
+                
+                # Find nearest matched script index to constrain the search window
+                nearest_s = -1
+                for fw in range(end, len(words)):
+                    if fw in real_idx_to_s:
+                        nearest_s = real_idx_to_s[fw]
+                        break
+                if nearest_s == -1:
+                    for bw in range(start - 1, -1, -1):
+                        if bw in real_idx_to_s:
+                            nearest_s = real_idx_to_s[bw]
+                            break
+                if nearest_s == -1: 
+                    nearest_s = 0
+                
+                s_start = max(0, nearest_s - 15)
+                s_end = min(len(self.script_tokens), nearest_s + 15)
+                
+                import re, difflib
+                window_text = " ".join(self.script_tokens[s_start:s_end]).lower()
+                window_text = re.sub(r'[^\w\s]', '', window_text)
+                
+                block_text = " ".join([self.words_data[j].get('text', '') for j in range(start, end)]).lower()
+                block_text = re.sub(r'[^\w\s]', '', block_text)
+                
+                has_match = False
+                
+                # Check 1: Fuzzy block match (for things like "...icious." matching "resolution")
+                if block_text and window_text:
+                    sm = difflib.SequenceMatcher(None, block_text, window_text)
+                    match = sm.find_longest_match(0, len(block_text), 0, len(window_text))
+                    coverage = match.size / len(block_text) if len(block_text) > 0 else 0
+                    if coverage > 0.3 or match.size >= 5:
+                        has_match = True
+                
+                # Check 2: Exact word match (for things like "So," matching "So")
+                if not has_match:
+                    window_words = set(window_text.split())
+                    for bw in block_text.split():
+                        if len(bw) >= 2 and bw in window_words:
+                            has_match = True
+                            break
+                            
+                if not has_match:
+                    for j in range(start, end):
+                        if self.words_data[j].get('type') != 'silence':
+                            self.words_data[j]['status'] = 'bad'
+                            self.words_data[j]['algo_status'] = 'bad'
+                            self.words_data[j]['selected'] = True
+            else:
+                i += 1
 
     def _phase_g_merge_combos(self, match_pairs):
         """
