@@ -287,6 +287,9 @@ class CompareEngineBase:
         self.distance_penalty = float(_s.get('algo_distance_penalty', 2.0))  # reserved for future use
         self.anchor_depth     = int(_s.get('algo_anchor_depth', 3))           # reserved for future use
 
+        self.words_data = words_data
+        self._sanitize_numbers()
+
         # A. Przygotowanie danych
         self.script_tokens = tokenize_v5(script_text)
         
@@ -299,7 +302,7 @@ class CompareEngineBase:
         self.trans_tokens = []
         self.trans_indices = [] 
         
-        for idx, w in enumerate(words_data):
+        for idx, w in enumerate(self.words_data):
             # v9.6 FULL CLEANUP: Reset all algorithm statuses before any processing.
             # This prevents unmatched gaps from retaining 'repeat' status from previous standalone runs,
             # which caused chain-reaction false positives in F.2b.
@@ -318,7 +321,6 @@ class CompareEngineBase:
                 self.trans_tokens.append(clean)
                 self.trans_indices.append(idx)
         
-        self.words_data = words_data
         self.s_len = len(self.script_tokens)
         self.t_len = len(self.trans_tokens)
         
@@ -332,6 +334,65 @@ class CompareEngineBase:
         
         # PATCH v6.3: List to track missing script parts for Yellow highlighting
         self.missing_script_indices = []
+
+    def _sanitize_numbers(self):
+        """
+        STAGE 10: Merges decimal numbers that Whisper split into two/three tokens.
+        Example: `0` and `.5` becomes `0.5`.
+        This prevents false-positive Retake (Red) or Typo (Green) flags.
+        """
+        if not self.words_data:
+            return
+
+        cleaned = []
+        i = 0
+
+        while i < len(self.words_data):
+            w = self.words_data[i]
+            
+            t1 = w.get('text', '').strip()
+            c1 = super_clean(t1)
+            
+            if c1 and c1.isdigit() and i + 1 < len(self.words_data):
+                next_w = self.words_data[i + 1]
+                t2 = next_w.get('text', '').strip()
+                c2 = super_clean(t2)
+                
+                # Case 1: `0` and `.5` (or `.5.`)
+                if c2 and c2.isdigit() and len(t2) > 0 and t2[0] in '.,':
+                    merged = w.copy()
+                    merged['text'] = t1 + t2
+                    merged['end'] = next_w.get('end', w.get('end'))
+                    cleaned.append(merged)
+                    i += 2
+                    continue
+                    
+                # Case 3: `0.` and `5`
+                if c2 and c2.isdigit() and len(t1) > 0 and t1[-1] in '.,':
+                    merged = w.copy()
+                    merged['text'] = t1 + t2
+                    merged['end'] = next_w.get('end', w.get('end'))
+                    cleaned.append(merged)
+                    i += 2
+                    continue
+                
+                # Case 2: `0` and `.` and `5`
+                if not c2 and len(t2) > 0 and t2[0] in '.,' and i + 2 < len(self.words_data):
+                    next_next_w = self.words_data[i + 2]
+                    t3 = next_next_w.get('text', '').strip()
+                    c3 = super_clean(t3)
+                    if c3 and c3.isdigit():
+                        merged = w.copy()
+                        merged['text'] = t1 + t2 + t3
+                        merged['end'] = next_next_w.get('end', w.get('end'))
+                        cleaned.append(merged)
+                        i += 3
+                        continue
+                    
+            cleaned.append(w)
+            i += 1
+
+        self.words_data[:] = cleaned
 
     def mark_range(self, t_start_idx, t_end_idx, status, is_auto=False):
         """Oznacza zakres w words_data (indeksy wirtualne -> rzeczywiste)."""
@@ -893,6 +954,13 @@ class CompareEngine(CompareEngineBase):
         self._phase_f_retake_detection(match_pairs)
         self._phase_h_smooth_statuses(match_pairs)
         
+        # Export DP exact coordinates to words_data for SBS (must happen BEFORE Phase G which shrinks the array)
+        for t_idx, s_idx, p in match_pairs:
+            if 0 <= t_idx < self.t_len:
+                real_t_idx = self.trans_indices[t_idx]
+                if 0 <= real_t_idx < len(self.words_data):
+                    self.words_data[real_t_idx]['_dp_script_index'] = s_idx
+
         if self.algo_settings and self.algo_settings.get('run_phase_g', False):
             self._phase_g_merge_combos(match_pairs)
 
@@ -1841,7 +1909,7 @@ def _script_lines_for_side_by_side(script_text):
                     curr_str = segment
                     curr_words = seg_words
                 else:
-                    if curr_words >= 5:
+                    if curr_words >= 12:
                         sub_rows.append(curr_str.strip())
                         curr_str = segment
                         curr_words = seg_words
@@ -1918,26 +1986,17 @@ def _side_by_side_text_from_transcript_tokens(tokens):
     return "".join(parts).strip()
 
 
-_sbs_difflib_cache = {
-    "script_hash": None,
-    "trans_text_hash": None,
-    "base_map": None
-}
-
 def build_side_by_side_alignment(script_text, words_data):
     """
     Builds rows for the side-by-side compare view.
     
     Strategy: Group by SCRIPT LINES, not transcript segments.
     1. Split script into lines (user line-breaks, or sentence fallback).
-    2. Use difflib to map each transcript token to its best-matching script line.
+    2. Map each transcript token to its exact script line using _dp_script_index from CompareEngine.
     3. Absorb repeat runs into the script line they're repeating.
     4. Unmatched transcript tokens (improv) → own row with empty script.
     5. Unmatched script lines (unspoken) → own row with empty transcript.
     """
-    global _sbs_difflib_cache
-    import hashlib
-
     script_lines = _script_lines_for_side_by_side(script_text)
     trans_tokens = _tokens_from_words_data(words_data)
 
@@ -1956,49 +2015,18 @@ def build_side_by_side_alignment(script_text, words_data):
     if not script_tokens and not trans_tokens:
         return []
 
-    script_hash = hashlib.md5(" ".join(t["clean"] for t in script_tokens).encode('utf-8')).hexdigest()
-    trans_text_hash = hashlib.md5(" ".join(t["clean"] for t in trans_tokens).encode('utf-8')).hexdigest()
+    # Map each transcript token → script line (or -1 for unmatched/improv)
+    trans_line_map = [-1] * len(trans_tokens)
 
-    if _sbs_difflib_cache.get("script_hash") == script_hash and _sbs_difflib_cache.get("trans_text_hash") == trans_text_hash:
-        trans_line_map = list(_sbs_difflib_cache["base_map"])
-    else:
-        # Map each transcript token → script line (or -1 for unmatched/improv)
-        trans_line_map = [-1] * len(trans_tokens)
-
-        # Filter out bad and repeat tokens so they don't corrupt the difflib alignment!
-        # This prevents difflib from aggressively matching retakes to early script lines,
-        # which causes the final correct takes to "bleed" into later lines.
-        valid_trans_tokens = []
-        valid_indices = []
-        for ti, t in enumerate(trans_tokens):
-            if t.get("status") not in ("bad", "repeat"):
-                valid_trans_tokens.append(t)
-                valid_indices.append(ti)
-
-        if script_tokens and valid_trans_tokens:
-            sm = difflib.SequenceMatcher(
-                None,
-                [t["clean"] for t in script_tokens],
-                [t["clean"] for t in valid_trans_tokens],
-                autojunk=False,
-            )
-
-            for tag, i1, i2, j1, j2 in sm.get_opcodes():
-                if tag == "equal":
-                    for i in range(j2 - j1):
-                        si = i1 + i
-                        if si < i2:
-                            trans_line_map[valid_indices[j1 + i]] = script_tokens[si]["line"]
-                elif tag == "replace":
-                    for i in range(j2 - j1):
-                        # Find corresponding script index by proportionality
-                        si = i1 + int(i * (i2 - i1) / max(1, j2 - j1))
-                        if si < i2:
-                            trans_line_map[valid_indices[j1 + i]] = script_tokens[si]["line"]
-
-        _sbs_difflib_cache["script_hash"] = script_hash
-        _sbs_difflib_cache["trans_text_hash"] = trans_text_hash
-        _sbs_difflib_cache["base_map"] = list(trans_line_map)
+    for ti, t in enumerate(trans_tokens):
+        orig_word = t.get("original_word", {})
+        s_idx = orig_word.get("_dp_script_index")
+        
+        # We only trust the DP mapping if it's NOT a bad/repeat word.
+        # Bad and repeat words should be anchored to their context via backward-fill.
+        status = t.get("status")
+        if s_idx is not None and 0 <= s_idx < len(script_tokens) and status not in ("bad", "repeat"):
+            trans_line_map[ti] = script_tokens[s_idx]["line"]
 
     # Smart Inline Bad Logic: identify short 'bad' blocks to be absorbed inline
     for ti in range(len(trans_tokens)):
@@ -2017,11 +2045,11 @@ def build_side_by_side_alignment(script_text, words_data):
         bad_blocks.append(current_block)
         
     for block in bad_blocks:
-        if len(block) <= 2:
-            max_len = max((len(trans_tokens[ti]["clean"]) for ti in block), default=0)
-            if max_len <= 5: # Small words like 'First', 'take', 'Yhm', 'Aha'
-                for ti in block:
-                    trans_tokens[ti]['is_inline_bad'] = True
+        # If the bad block is short (up to 3 words), treat it as an inline error/stutter
+        # rather than a full improvised paragraph, so it doesn't break the SBS layout.
+        if len(block) <= 3:
+            for ti in block:
+                trans_tokens[ti]['is_inline_bad'] = True
 
     # Force 'bad' and 'repeat' words to -1, to isolate them and let backward-fill group retakes.
     for ti in range(len(trans_tokens)):
@@ -2060,8 +2088,11 @@ def build_side_by_side_alignment(script_text, words_data):
     for ti in range(len(trans_tokens)):
         if trans_line_map[ti] != -1:
             continue
-        if trans_tokens[ti].get("status") == "bad" and not trans_tokens[ti].get("is_inline_bad"):
+            
+        tok_status = trans_tokens[ti].get("status")
+        if tok_status == "bad" and not trans_tokens[ti].get("is_inline_bad"):
             continue
+            
         # Look backward and forward for nearest assigned lines
         prev_line = -1
         for pi in range(ti - 1, -1, -1):
@@ -2073,8 +2104,14 @@ def build_side_by_side_alignment(script_text, words_data):
             if trans_line_map[ni] != -1:
                 next_line = trans_line_map[ni]
                 break
+                
         if prev_line != -1 and prev_line == next_line:
             trans_line_map[ti] = prev_line
+        elif tok_status != "bad":
+            if prev_line != -1:
+                trans_line_map[ti] = prev_line
+            elif next_line != -1:
+                trans_line_map[ti] = next_line
 
     # Build line → transcript tokens mapping (ordered list of groups)
     # We need to preserve transcript ORDER, so we walk through trans_tokens
@@ -2128,30 +2165,28 @@ def build_side_by_side_alignment(script_text, words_data):
                 "transcript_text": " ".join(t.get("text", "") for t in toks),
                 "script_kind": "improv_gap",
                 "transcript_kind": "improv",
+                "_is_interruption": True
             })
         else:
-            # Check if this script line already has a row (merge)
-            existing = None
-            for row in final_rows:
-                if row.get("_line_idx") == line_idx and row.get("script_kind") != "missing":
-                    existing = row
-                    break
-
-            if existing:
-                # Merge tokens into existing row
-                existing["transcript_tokens"].extend(toks)
-                existing["transcript_text"] += " " + " ".join(t.get("text", "") for t in toks)
+            is_interruption = False
+            if line_idx in emitted_script_lines:
+                # This script line was interrupted by an improvisation.
+                # To maintain strict chronology, we create a new row but do not duplicate the script text.
+                script_line_text = ""
+                is_interruption = True
             else:
                 script_line_text = script_lines[line_idx] if line_idx < len(script_lines) else ""
-                final_rows.append({
-                    "_line_idx": line_idx,
-                    "script_text": script_line_text,
-                    "transcript_tokens": toks,
-                    "transcript_text": " ".join(t.get("text", "") for t in toks),
-                    "script_kind": "normal",
-                    "transcript_kind": "normal",
-                })
                 emitted_script_lines.add(line_idx)
+                
+            final_rows.append({
+                "_line_idx": line_idx,
+                "script_text": script_line_text,
+                "transcript_tokens": toks,
+                "transcript_text": " ".join(t.get("text", "") for t in toks),
+                "script_kind": "normal",
+                "transcript_kind": "normal",
+                "_is_interruption": is_interruption
+            })
 
     # Append any remaining unmatched script lines at the end
     for sl in range(len(script_lines)):

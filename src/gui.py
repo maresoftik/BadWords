@@ -1775,17 +1775,38 @@ class TranscriptionCanvas(QWidget):
             default_script_start_x = 20 + ts_base_w + 10
             default_script_w = (self.width() // 2 - 20) - default_script_start_x
             
+            show_inaudible = True
+            if hasattr(self.main_window, 'tgl_show_inaudible'):
+                show_inaudible = self.main_window.tgl_show_inaudible.isChecked()
+
             for idx, row in enumerate(self.sbs_rows):
                 script_text = row.get("script_text", "")
                 
                 trans_toks = row.get("transcript_tokens", [])
                 
+                if not show_inaudible:
+                    filtered_toks = []
+                    for tok in trans_toks:
+                        w = tok.get("original_word", {})
+                        if not (w.get('is_inaudible') or w.get('type') == 'inaudible'):
+                            filtered_toks.append(tok)
+                    trans_toks = filtered_toks
+                    row["transcript_tokens"] = trans_toks # Update the row itself for rendering
+                    
+                if not script_text.strip() and not trans_toks:
+                    continue
+                
+                is_interruption = row.get("_is_interruption", False)
+                
                 # Separator line between rows
                 if y > 20:
-                    y += 20
-                    # Store separator on a virtual dictionary to avoid tainting real words
-                    sep_marker = {'_separator_y': y - 10}
-                    visible_words.append(sep_marker)
+                    if is_interruption:
+                        y += 10
+                    else:
+                        y += 20
+                        # Store separator on a virtual dictionary to avoid tainting real words
+                        sep_marker = {'_separator_y': y - 10}
+                        visible_words.append(sep_marker)
                             
                 row_start_y = y
                 x = max_w if is_rtl else right_start_x
@@ -1904,17 +1925,7 @@ class TranscriptionCanvas(QWidget):
                         '_rect': bg_rect
                     })
                     
-                    if script_kind == "improv_gap":
-                        placeholder = self.main_window.txt("sbs_improvised_error")
-                        pw = metrics.horizontalAdvance(placeholder)
-                        visible_words.append({
-                            'text': placeholder,
-                            '_display_text': placeholder,
-                            '_rect': QRect(script_start_x, row_start_y + (row_h - metrics.height()) // 2, pw, metrics.height() + 4),
-                            'is_script_placeholder': True,
-                            'script_kind': "improv_gap"
-                        })
-                    elif script_kind == "missing":
+                    if script_kind == "missing":
                         placeholder = self.main_window.txt("sbs_skipped")
                         pw = metrics.horizontalAdvance(placeholder)
                         rx = right_start_x
@@ -9323,11 +9334,6 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             self._chapters[self._current_chapter_idx]['words'] = clean_words
             
         sbs_cache = None
-        if getattr(self, '_sbs_last_script_hash', None):
-            sbs_cache = {
-                "hash": self._sbs_last_script_hash,
-                "rows": []
-            }
             
         analysis_time = ""
         if hasattr(self, 'lbl_analysis_duration') and self.lbl_analysis_duration.isVisible():
@@ -11013,6 +11019,13 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             _log_error(f"Could not persist transcription_source: {_e}")
 
         self._populate_editor(words_data, segments_data)
+        
+        # Load pre-calculated SBS cache if it exists (from initial transcript auto-compare)
+        if getattr(self.engine, 'sbs_cache', None):
+            self._sbs_last_script_hash = self.engine.sbs_cache.get('hash')
+            if hasattr(self, 'text_canvas'):
+                self.text_canvas.sbs_rows = self.engine.sbs_cache.get('rows', [])
+            self.engine.sbs_cache = None
         
         if hasattr(self, '_transcription_start_time'):
             import time

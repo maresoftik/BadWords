@@ -1552,7 +1552,18 @@ except Exception as e:
                         expected_script, words_data, algo_settings=algo_settings_copy
                     )
                     words_data = compare_result
-                    self.sbs_cache = None
+                    
+                    # Generate SBS cache immediately
+                    try:
+                        sbs_rows = algorithms.build_side_by_side_alignment(expected_script, words_data)
+                        curr_hash = " ".join(algorithms.super_clean(w) for w in expected_script.split() if algorithms.super_clean(w))
+                        self.sbs_cache = {
+                            "hash": curr_hash,
+                            "rows": sbs_rows
+                        }
+                    except Exception as e:
+                        log_error(f"Failed to pre-calculate SBS cache: {e}")
+                        self.sbs_cache = None
 
                 words_data = algorithms.absorb_inaudible_into_repeats(words_data)
                 
