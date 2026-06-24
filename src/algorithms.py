@@ -152,9 +152,26 @@ def super_clean(text):
     Funkcja pomocnicza 'SuperCompare' (część A).
     Usuwa WSZYSTKO co nie jest cyfrą lub literą (włączając unicode).
     Zamienia słowne liczby 0-10 na cyfry.
+    Mapuje znaki specjalne na słowa, żeby wyrównać skróty typu CTRL+K.
     """
     if not text: return ""
-    cleaned = re.sub(r'[^\w]', '', text.lower()).replace('_', '')
+    text = str(text).lower()
+    
+    # Map common spoken symbols to words before stripping
+    symbol_map = {
+        '+': 'plus',
+        '-': 'minus',
+        '=': 'equals',
+        '@': 'at',
+        '#': 'hash',
+        '*': 'star',
+        '&': 'and',
+        '%': 'percent'
+    }
+    for sym, word in symbol_map.items():
+        text = text.replace(sym, word)
+        
+    cleaned = re.sub(r'[^\w]', '', text).replace('_', '')
     NUMBER_WORDS = {
         'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4', 
         'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10',
@@ -739,7 +756,7 @@ class CompareEngine(CompareEngineBase):
                     while walk_i > 0 and ptr[walk_i][walk_j] == 3:
                         walk_i -= 1
                     prev_ptr = ptr[walk_i][walk_j]
-                    contiguity = 15.0 if (best_k_exact == 0 and prev_ptr >= 10) else 0.0
+                    contiguity = 15.0 if prev_ptr >= 10 else 0.0
                     score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 10.0 + contiguity + recency_bonus + (best_k_exact * 2.0) + (best_s_exact * 2.0)
                 else:
                     score_exact = -999999.0
@@ -750,7 +767,7 @@ class CompareEngine(CompareEngineBase):
                     while walk_i > 0 and ptr[walk_i][walk_j] == 3:
                         walk_i -= 1
                     prev_ptr = ptr[walk_i][walk_j]
-                    contiguity = 15.0 if (best_k_fuzzy == 0 and prev_ptr >= 10) else 0.0
+                    contiguity = 15.0 if prev_ptr >= 10 else 0.0
                     score_fuzzy = dp[i-1-best_s_fuzzy][j-1-best_k_fuzzy] + 5.0 + contiguity + recency_bonus + (best_k_fuzzy * 5.0) + (best_s_fuzzy * 5.0)
                 else:
                     score_fuzzy = -999999.0
@@ -1252,7 +1269,7 @@ class CompareEngine(CompareEngineBase):
             # --- Smart Auto-Correction Logic ---
             script_raw = self.script_tokens[s_idx]
             import re
-            is_tech = bool(re.search(r'[/.\\]|\b[a-zA-Z]+[0-9]+', script_raw))
+            is_tech = bool(re.search(r'[/.\\+\-_@#*]|\b[a-zA-Z]+[0-9]+|[0-9]+[a-zA-Z]+', script_raw))
             script_digits = re.sub(r'\D', '', script_raw)
             combo_digits = re.sub(r'\D', '', combo_text)
             
@@ -1274,7 +1291,7 @@ class CompareEngine(CompareEngineBase):
                         if ratio >= 0.75:
                             should_autocorrect = True
                     else:
-                        if ratio >= 0.85 and script_digits == combo_digits:
+                        if ratio >= 0.80 and script_digits == combo_digits:
                             should_autocorrect = True
                             
             if should_autocorrect:
