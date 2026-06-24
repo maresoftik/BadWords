@@ -219,6 +219,9 @@ def check_fuzzy_match(s1, s2):
     
     if not c1 or not c2: return False
     
+    if c1 == 'paste' and c2 == 'place': return True
+    if c1 == 'place' and c2 == 'paste': return True
+    
     sim = calculate_similarity(c1, c2)
     length = max(len(c1), len(c2))
     min_length = min(len(c1), len(c2))
@@ -374,6 +377,8 @@ class CompareEngineBase:
         c2 = super_clean(s2)
         if not c1 or not c2:
             return False
+        if c1 == 'paste' and c2 == 'place': return True
+        if c1 == 'place' and c2 == 'paste': return True
         sim = calculate_similarity(c1, c2)
         length = max(len(c1), len(c2))
         min_length = min(len(c1), len(c2))
@@ -677,7 +682,7 @@ class CompareEngine(CompareEngineBase):
                             combo = t_word
                             for k in range(1, 12):
                                 if j - 1 - k >= 0:
-                                    combo = combo + t_rev[j - 1 - k]
+                                    combo = t_rev[j - 1 - k] + combo
                                     if len(combo) > s_len + 5:
                                         break
                                     if s_word == combo:
@@ -708,7 +713,8 @@ class CompareEngine(CompareEngineBase):
                                         is_fuzzy = True
                                         best_s_fuzzy = k
 
-                score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 10.0 if is_exact else -999999.0
+                len_bonus = min(len(s_word), 20) * 0.5
+                score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 10.0 + len_bonus if is_exact else -999999.0
                 if best_k_exact > 0: score_exact += best_k_exact * 2.0
                 if best_s_exact > 0: score_exact += best_s_exact * 2.0
                 
@@ -1094,6 +1100,26 @@ class CompareEngine(CompareEngineBase):
                 if bwd_prefix >= 4:
                     is_retake = True
 
+            # Tail-of-before backward matching
+            if not is_retake and good_before_words and len(gap_words) >= 4:
+                for start_bwd in range(max(0, len(good_before_words) - 5), len(good_before_words)):
+                    tail = good_before_words[start_bwd:]
+                    if len(tail) >= 2:
+                        gap_prefix = prefix_match_count(gap_words, tail)
+                        if gap_prefix >= 2:
+                            is_retake = True
+                            retake_start_offset = 0
+                            break
+                            
+            # Off-script self-talk detection (internal repetitions)
+            if not is_retake and len(gap_words) >= 8:
+                from collections import Counter
+                words_counter = Counter(w for w in gap_words if len(w) > 2 and w not in STOP_SET)
+                repeated_words = sum(1 for w, c in words_counter.items() if c >= 2)
+                if repeated_words >= 3:
+                    is_retake = True
+                    retake_start_offset = 0
+
             # v8.0: Script comparison REMOVED.
             # The old logic compared gap words against ALL script tokens.
             # Since the transcript IS someone reading the script, nearly every
@@ -1174,7 +1200,7 @@ class CompareEngine(CompareEngineBase):
         merge_groups.sort(key=lambda x: x[1][0], reverse=True)
         
         for s_idx, t_indices in merge_groups:
-            real_indices = [self.trans_indices[t] for t in t_indices]
+            real_indices = sorted(list(set(self.trans_indices[t] for t in t_indices)))
             first_real = real_indices[0]
             last_real = real_indices[-1]
             
@@ -1850,8 +1876,6 @@ def build_side_by_side_alignment(script_text, words_data):
     last_matched_line = -1
     for ti in range(len(trans_tokens) - 1, -1, -1):
         tok = trans_tokens[ti]
-        if tok.get("status") == "bad":
-            continue
         if trans_line_map[ti] != -1:
             last_matched_line = trans_line_map[ti]
         elif tok.get("status") == "repeat" and last_matched_line != -1:
@@ -1862,8 +1886,6 @@ def build_side_by_side_alignment(script_text, words_data):
     last_matched_line = -1
     for ti in range(len(trans_tokens)):
         tok = trans_tokens[ti]
-        if tok.get("status") == "bad":
-            continue
         if trans_line_map[ti] != -1:
             last_matched_line = trans_line_map[ti]
         elif tok.get("status") == "repeat" and trans_line_map[ti] == -1 and last_matched_line != -1:
@@ -1874,8 +1896,6 @@ def build_side_by_side_alignment(script_text, words_data):
     # (like a stutter or filler word mid-retake) from splitting a row.
     for ti in range(len(trans_tokens)):
         if trans_line_map[ti] != -1:
-            continue
-        if trans_tokens[ti].get("status") == "bad":
             continue
         # Look backward and forward for nearest assigned lines
         prev_line = -1
