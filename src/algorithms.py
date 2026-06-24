@@ -1264,7 +1264,9 @@ class CompareEngine(CompareEngineBase):
             else:
                 combo_text = merged.get('text', '')
                 
-            merged['end'] = self.words_data[last_real]['end']
+            if 'start' in self.words_data[first_real]:
+                merged['start'] = self.words_data[first_real]['start']
+            merged['end'] = self.words_data[last_real].get('end', self.words_data[last_real].get('start', 0.0))
             
             # --- Smart Auto-Correction Logic ---
             script_raw = self.script_tokens[s_idx]
