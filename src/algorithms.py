@@ -153,8 +153,9 @@ def super_clean(text):
     Usuwa WSZYSTKO co nie jest cyfrą lub literą (włączając unicode).
     Zamienia słowne liczby 0-10 na cyfry.
     """
-    if not text: return ""
-    cleaned = re.sub(r'[^\w]', '', text.lower()).replace('_', '')
+    t_lower = text.lower()
+    if t_lower == '+': return 'plus'
+    cleaned = re.sub(r'[^\w]', '', t_lower).replace('_', '')
     NUMBER_WORDS = {
         'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4', 
         'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10',
@@ -183,7 +184,11 @@ def tokenize_v5(text):
         # Usuń interpunkcję z krawędzi słowa
         stripped = t.strip(".,?!:;\"'()[]{}")
         if stripped:
-            clean_tokens.append(stripped)
+            sub_tokens = re.split(r'(\+)', stripped)
+            for st in sub_tokens:
+                st = st.strip()
+                if st:
+                    clean_tokens.append(st)
             
     return clean_tokens
 
@@ -218,9 +223,6 @@ def check_fuzzy_match(s1, s2):
     c2 = super_clean(s2)
     
     if not c1 or not c2: return False
-    
-    if c1 == 'paste' and c2 == 'place': return True
-    if c1 == 'place' and c2 == 'paste': return True
     
     sim = calculate_similarity(c1, c2)
     length = max(len(c1), len(c2))
@@ -377,8 +379,6 @@ class CompareEngineBase:
         c2 = super_clean(s2)
         if not c1 or not c2:
             return False
-        if c1 == 'paste' and c2 == 'place': return True
-        if c1 == 'place' and c2 == 'paste': return True
         sim = calculate_similarity(c1, c2)
         length = max(len(c1), len(c2))
         min_length = min(len(c1), len(c2))
