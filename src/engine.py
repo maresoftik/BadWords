@@ -1548,7 +1548,7 @@ except Exception as e:
                     algo_settings_copy = dict(settings.get("algo_settings", {}))
                     algo_settings_copy['run_phase_g'] = True
                     import algorithms
-                    compare_result = algorithms.compare_script_to_transcript(
+                    compare_result = self.run_compare_in_subprocess(
                         expected_script, words_data, algo_settings=algo_settings_copy
                     )
                     words_data = compare_result
@@ -2205,6 +2205,107 @@ except Exception as e:
             
         return processed_words, count
 
+    def run_compare_in_subprocess(self, script_text, words_data, algo_settings=None):
+        import time
+        import subprocess
+        
+        unique_name = f"compare_{int(time.time() * 1000)}"
+        output_dir = self.os_doc.get_temp_folder()
+        os.makedirs(output_dir, exist_ok=True)
+        
+        input_json_path = os.path.join(output_dir, f"{unique_name}_in.json")
+        output_json_path = os.path.join(output_dir, f"{unique_name}_out.json")
+        runner_script_path = os.path.join(output_dir, f"{unique_name}_runner.py")
+        
+        clean_words = []
+        for w in words_data:
+            clean_w = {}
+            for k, v in w.items():
+                if isinstance(v, (str, int, float, bool, type(None), list, dict)):
+                    clean_w[k] = v
+            clean_words.append(clean_w)
+            
+        with open(input_json_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "script_text": script_text,
+                "words_data": clean_words,
+                "algo_settings": algo_settings or {}
+            }, f)
+            
+        script_content = f"""
+import sys
+import json
+import os
+
+src_dir = {repr(os.path.dirname(os.path.abspath(__file__)))}
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
+
+try:
+    import algorithms
+    with open({repr(input_json_path)}, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+        
+    result_words = algorithms.compare_script_to_transcript(
+        data.get('script_text', ''), 
+        data.get('words_data', []), 
+        algo_settings=data.get('algo_settings')
+    )
+    
+    with open({repr(output_json_path)}, 'w', encoding='utf-8') as f:
+        json.dump(result_words, f)
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+"""
+        with open(runner_script_path, "w", encoding="utf-8") as f:
+            f.write(script_content)
+            
+        python_exec = self._get_python_executable()
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        cmd = [python_exec, runner_script_path]
+        
+        log_info(f"Running CompareEngine in subprocess... Script: {runner_script_path}")
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                universal_newlines=True,
+                env=env,
+                **self.os_doc.get_subprocess_kwargs()
+            )
+            
+            stdout, _ = process.communicate()
+            
+            if process.returncode != 0:
+                log_error(f"Compare subprocess failed:\\n{stdout}")
+                return words_data
+                
+            if not os.path.exists(output_json_path):
+                log_error("Compare subprocess finished but output json not found.")
+                return words_data
+                
+            with open(output_json_path, 'r', encoding='utf-8') as f:
+                result_words = json.load(f)
+                
+            return result_words
+        except Exception as e:
+            log_error(f"Error launching compare subprocess: {e}")
+            return words_data
+        finally:
+            try: os.remove(input_json_path)
+            except: pass
+            try: os.remove(output_json_path)
+            except: pass
+            try: os.remove(runner_script_path)
+            except: pass
+
     def run_comparison_analysis(self, script_text, words_data):
         prefs = self.os_doc.get_all_prefs()
         algo_settings = {k: prefs[k] for k in ('algo_fuzzy_threshold', 'algo_retake_lookahead', 'algo_distance_penalty', 'algo_anchor_depth') if k in prefs}
@@ -2213,10 +2314,9 @@ except Exception as e:
         # which causes aggressive false positive "blue" retakes. We force V6 to ensure accurate results.
         
         # Multiprocessing in PyInstaller without freeze_support() causes a fatal crash.
-        # We must run it directly (which executes in the QThread established by gui.py).
-        # Since the DP loop has been heavily optimized and no longer has a band radius,
-        # it will compute so fast that the GIL lock will barely be noticeable.
-        result_words = algorithms.compare_script_to_transcript(script_text, words_data, algo_settings=algo_settings)
+        # However, blocking the GUI thread (GIL) during DP loop causes freezing.
+        # We now offload it completely to a separate process via subprocess to guarantee fluid UI.
+        result_words = self.run_compare_in_subprocess(script_text, words_data, algo_settings=algo_settings)
             
         final_words = algorithms.absorb_inaudible_into_repeats(result_words)
         # FIX: Force hallucination status after script comparison analysis

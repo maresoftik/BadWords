@@ -153,9 +153,8 @@ def super_clean(text):
     Usuwa WSZYSTKO co nie jest cyfrą lub literą (włączając unicode).
     Zamienia słowne liczby 0-10 na cyfry.
     """
-    t_lower = text.lower()
-    if t_lower == '+': return 'plus'
-    cleaned = re.sub(r'[^\w]', '', t_lower).replace('_', '')
+    if not text: return ""
+    cleaned = re.sub(r'[^\w]', '', text.lower()).replace('_', '')
     NUMBER_WORDS = {
         'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4', 
         'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10',
@@ -184,11 +183,7 @@ def tokenize_v5(text):
         # Usuń interpunkcję z krawędzi słowa
         stripped = t.strip(".,?!:;\"'()[]{}")
         if stripped:
-            sub_tokens = re.split(r'(\+)', stripped)
-            for st in sub_tokens:
-                st = st.strip()
-                if st:
-                    clean_tokens.append(st)
+            clean_tokens.append(stripped)
             
     return clean_tokens
 
@@ -682,7 +677,7 @@ class CompareEngine(CompareEngineBase):
                             combo = t_word
                             for k in range(1, 12):
                                 if j - 1 - k >= 0:
-                                    combo = t_rev[j - 1 - k] + combo
+                                    combo = combo + t_rev[j - 1 - k]
                                     if len(combo) > s_len + 5:
                                         break
                                     if s_word == combo:
@@ -713,8 +708,7 @@ class CompareEngine(CompareEngineBase):
                                         is_fuzzy = True
                                         best_s_fuzzy = k
 
-                len_bonus = len(s_word) * 2.0
-                score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 10.0 + len_bonus if is_exact else -999999.0
+                score_exact = dp[i-1-best_s_exact][j-1-best_k_exact] + 10.0 if is_exact else -999999.0
                 if best_k_exact > 0: score_exact += best_k_exact * 2.0
                 if best_s_exact > 0: score_exact += best_s_exact * 2.0
                 
@@ -1100,26 +1094,6 @@ class CompareEngine(CompareEngineBase):
                 if bwd_prefix >= 4:
                     is_retake = True
 
-            # Tail-of-before backward matching
-            if not is_retake and good_before_words and len(gap_words) >= 4:
-                for start_bwd in range(max(0, len(good_before_words) - 5), len(good_before_words)):
-                    tail = good_before_words[start_bwd:]
-                    if len(tail) >= 2:
-                        gap_prefix = prefix_match_count(gap_words, tail)
-                        if gap_prefix >= 2:
-                            is_retake = True
-                            retake_start_offset = 0
-                            break
-                            
-            # Off-script self-talk detection (internal repetitions)
-            if not is_retake and len(gap_words) >= 8:
-                from collections import Counter
-                words_counter = Counter(w for w in gap_words if len(w) > 2 and w not in STOP_SET)
-                repeated_words = sum(1 for w, c in words_counter.items() if c >= 2)
-                if repeated_words >= 3:
-                    is_retake = True
-                    retake_start_offset = 0
-
             # v8.0: Script comparison REMOVED.
             # The old logic compared gap words against ALL script tokens.
             # Since the transcript IS someone reading the script, nearly every
@@ -1200,7 +1174,7 @@ class CompareEngine(CompareEngineBase):
         merge_groups.sort(key=lambda x: x[1][0], reverse=True)
         
         for s_idx, t_indices in merge_groups:
-            real_indices = sorted(list(set(self.trans_indices[t] for t in t_indices)))
+            real_indices = [self.trans_indices[t] for t in t_indices]
             first_real = real_indices[0]
             last_real = real_indices[-1]
             
@@ -1864,6 +1838,29 @@ def build_side_by_side_alignment(script_text, words_data):
         _sbs_difflib_cache["trans_text_hash"] = trans_text_hash
         _sbs_difflib_cache["base_map"] = list(trans_line_map)
 
+    # Smart Inline Bad Logic: identify short 'bad' blocks to be absorbed inline
+    for ti in range(len(trans_tokens)):
+        trans_tokens[ti]['is_inline_bad'] = False
+        
+    bad_blocks = []
+    current_block = []
+    for ti in range(len(trans_tokens)):
+        if trans_tokens[ti].get("status") == "bad":
+            current_block.append(ti)
+        else:
+            if current_block:
+                bad_blocks.append(current_block)
+                current_block = []
+    if current_block:
+        bad_blocks.append(current_block)
+        
+    for block in bad_blocks:
+        if len(block) <= 2:
+            max_len = max((len(trans_tokens[ti]["clean"]) for ti in block), default=0)
+            if max_len <= 5: # Small words like 'First', 'take', 'Yhm', 'Aha'
+                for ti in block:
+                    trans_tokens[ti]['is_inline_bad'] = True
+
     # Force 'bad' and 'repeat' words to -1, to isolate them and let backward-fill group retakes.
     for ti in range(len(trans_tokens)):
         status = trans_tokens[ti].get("status")
@@ -1876,9 +1873,11 @@ def build_side_by_side_alignment(script_text, words_data):
     last_matched_line = -1
     for ti in range(len(trans_tokens) - 1, -1, -1):
         tok = trans_tokens[ti]
+        if tok.get("status") == "bad" and not tok.get("is_inline_bad"):
+            continue
         if trans_line_map[ti] != -1:
             last_matched_line = trans_line_map[ti]
-        elif tok.get("status") == "repeat" and last_matched_line != -1:
+        elif (tok.get("status") == "repeat" or tok.get("is_inline_bad")) and last_matched_line != -1:
             trans_line_map[ti] = last_matched_line
 
     # Forward-fill: acts as a fallback for trailing repeats at the end of the 
@@ -1886,9 +1885,11 @@ def build_side_by_side_alignment(script_text, words_data):
     last_matched_line = -1
     for ti in range(len(trans_tokens)):
         tok = trans_tokens[ti]
+        if tok.get("status") == "bad" and not tok.get("is_inline_bad"):
+            continue
         if trans_line_map[ti] != -1:
             last_matched_line = trans_line_map[ti]
-        elif tok.get("status") == "repeat" and trans_line_map[ti] == -1 and last_matched_line != -1:
+        elif (tok.get("status") == "repeat" or tok.get("is_inline_bad")) and trans_line_map[ti] == -1 and last_matched_line != -1:
             trans_line_map[ti] = last_matched_line
 
     # Bridge-fill: absorb isolated unmatched tokens (bad/None) that sit between
@@ -1896,6 +1897,8 @@ def build_side_by_side_alignment(script_text, words_data):
     # (like a stutter or filler word mid-retake) from splitting a row.
     for ti in range(len(trans_tokens)):
         if trans_line_map[ti] != -1:
+            continue
+        if trans_tokens[ti].get("status") == "bad" and not trans_tokens[ti].get("is_inline_bad"):
             continue
         # Look backward and forward for nearest assigned lines
         prev_line = -1
