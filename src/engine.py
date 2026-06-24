@@ -1542,12 +1542,12 @@ except Exception as e:
                 update_status(self.txt("status_finalize"))
                 
                 # --- AUTO COMPARE PHASE ---
+                import algorithms
                 if expected_script:
                     log_info("Auto-running CompareEngine post-transcription with Phase G...")
                     update_progress(-1)
                     algo_settings_copy = dict(settings.get("algo_settings", {}))
                     algo_settings_copy['run_phase_g'] = True
-                    import algorithms
                     compare_result = self.run_compare_in_subprocess(
                         expected_script, words_data, algo_settings=algo_settings_copy
                     )
@@ -1767,6 +1767,7 @@ except Exception as e:
                         "start": real_start, "end": real_end,
                         "selected": is_bad,
                         "status": status,
+                        "is_filler": is_bad,
                         "seg_start": seg_start, "seg_end": seg_end,
                         "is_segment_start": is_first,
                         "type": "word",

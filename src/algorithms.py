@@ -716,7 +716,8 @@ class CompareEngine(CompareEngineBase):
                         is_fuzzy = True
                         base_is_fuzzy = True
                         
-                    if not base_is_fuzzy and s_word != "" and t_len < s_len and s_len > 3:
+                    # Only block fuzzy combo matches if base is fuzzy. Exact combos should always be allowed.
+                    if s_word != "" and t_len < s_len and s_len > 3:
                         if t_first == s_first or t_last == s_last or (len(t_word) > 3 and t_word in s_word):
                             combo = t_word
                             for k in range(1, 12):
@@ -728,11 +729,11 @@ class CompareEngine(CompareEngineBase):
                                         is_exact = True
                                         best_k_exact = k
                                         break
-                                    elif check_fuzzy(s_word, combo):
+                                    elif not base_is_fuzzy and check_fuzzy(s_word, combo):
                                         is_fuzzy = True
                                         best_k_fuzzy = k
 
-                    if not base_is_fuzzy and not is_exact and t_word != "" and s_len < t_len and t_len > 3:
+                    if not is_exact and t_word != "" and s_len < t_len and t_len > 3:
                         if s_first == t_first or s_last == t_last or (len(s_word) > 3 and s_word in t_word):
                             combo_s = s_word
                             for k in range(1, 12):
@@ -744,7 +745,7 @@ class CompareEngine(CompareEngineBase):
                                         is_exact = True
                                         best_s_exact = k
                                         break
-                                    elif check_fuzzy(combo_s, t_word):
+                                    elif not base_is_fuzzy and check_fuzzy(combo_s, t_word):
                                         is_fuzzy = True
                                         best_s_fuzzy = k
 
@@ -1189,7 +1190,15 @@ class CompareEngine(CompareEngineBase):
         for k in range(self.t_len):
             real_idx = self.trans_indices[k]
             w = self.words_data[real_idx]
-            if w.get('status') != 'repeat':
+            
+            if w.get('status') == 'repeat':
+                pass
+            elif w.get('status') == 'bad':
+                import re
+                text_len = len(re.sub(r'[^\w]', '', w.get('text', '')))
+                if text_len > 3 or w.get('is_filler'):
+                    continue
+            else:
                 continue
             
             cur_time = w.get('start', 0) or 0
