@@ -1261,10 +1261,9 @@ except Exception as e:
                     try: os.remove(p)
                     except Exception as e:
                         log_error(f"run_fast_silence_pipeline cleanup: cannot remove {p}: {e}")
-            if wav_path and os.path.exists(wav_path):
-                try: os.remove(wav_path)
-                except Exception as e:
-                    log_error(f"run_fast_silence_pipeline cleanup: cannot remove wav: {e}")
+            if wav_path and os.path.exists(wav_path) and 'words_data' in locals() and words_data:
+                words_data[0]['meta_audio_path'] = wav_path
+                # Do not delete wav_path so it can be used for audio preview
 
 
     def run_analysis_pipeline(self, settings, callback_status=None, callback_progress=None):
@@ -1387,7 +1386,7 @@ except Exception as e:
             fps = self.resolve_handler.fps
             txt_inaudible = "inaudible"
             
-            USE_SLOW_MODE = True 
+            USE_SLOW_MODE = False 
             SLOW_FACTOR = 0.90  # STAGE 9 FIX: 10% slowdown only; deep slow destroys phonetic transients
             
             unique_id = f"BW_{int(time.time())}"
@@ -1538,15 +1537,13 @@ except Exception as e:
             # silence_ranges already computed above — reused here for data structure
             
             # Cleanup
+            final_audio = wav_path
+            
             for p in [wav_path, current_wav_path, normalized_wav]:
-                if p and os.path.exists(p) and p != wav_path:
+                if p and os.path.exists(p) and p != final_audio:
                     try: os.remove(p)
                     except Exception as e:
                         log_error(f"run_analysis_pipeline cleanup: cannot remove {p}: {e}")
-            try: os.remove(wav_path)
-            except Exception as e:
-                log_error(f"run_analysis_pipeline cleanup: cannot remove wav: {e}")
-
             update_status(self.txt("status_process"))
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -1556,6 +1553,10 @@ except Exception as e:
                 txt_inaudible, time_scale_correction,
                 expected_script=expected_script
             )
+            
+            if final_audio and os.path.exists(final_audio) and words_data:
+                words_data[0]['meta_audio_path'] = final_audio
+                # Do not delete final_audio so it can be used for audio preview
             
             if words_data:
                 update_status(self.txt("status_finalize"))

@@ -1015,6 +1015,7 @@ TRANS = {
         "tt_more_accurate": "This option allows you to paste/import a script before transcription.\nKeywords are extracted from this script and fed to Whisper (the audio\ntranscription model), making the transcription more accurate.\n\nThis option is highly recommended for strictly technical scripts containing\nmany words with non-phonetic spellings (e.g., system paths, names with\nnumbers, special characters, etc.).\n\nAdditionally, this option automatically runs the transcript-script comparison\nalgorithm, so after transcription is complete, colors are immediately\nvisible, and the Side-by-side view loads instantly.",
         "tt_jump_to_word_info": "Jumps the DaVinci playhead to the exact moment the clicked word was spoken.\n\nAvailable shortcuts:\nCTRL/ALT/SHIFT + Left/Right Click.",        "ph_support_email": "Your Email Address (Optional)",
         "btn_copy_path": "Copy Path",
+        "msg_audio_preview_unavailable": "Audio preview unavailable until next transcription.",
 
     },
     'pl': {
@@ -1381,6 +1382,7 @@ TRANS = {
         "tt_more_accurate": "Opcja ta pozwala na wklejenie/zaimportowanie scenariusza przed transkrypcją,\nz tego scenariusza wyciągane są słowa kluczowe, które następnie są podawane\ndo Whispera, czyli modelu transkrybującego audio, dzięki czemu transkrypcja\nmoże być bardziej dokładna.\n\nTa opcja jest szczególnie polecana do scenariuszy stricte technicznych,\nzawierających wiele słów, których zapis jest inny niż fonetyczny\n(czyli np. ścieżki systemowe, nazwy z cyframi, znaki specjalne itd.).\n\nDodatkowo ta opcja samoczynnie przechodzi przez algorytm porównywania\ntranskryptu ze scenariuszem, więc po zakończonej transkrypcji kolory są\nwidoczne od razu, a widok Side-by-side załadowuje się natychmiastowo.",
         "tt_jump_to_word_info": "Skacze kursorem (playhead) DaVinci do momentu, w którym kliknięte słowo zostało wypowiedziane w audio.\n\nDostępne skróty:\nCTRL/ALT/SHIFT + Lewy/Prawy Przycisk Myszy.",        "ph_support_email": "Twój adres e-mail (Opcjonalnie)",
         "btn_copy_path": "Kopiuj ścieżkę",
+        "msg_audio_preview_unavailable": "Podgląd audio niedostępny do następnej transkrypcji.",
 
     },
     'de': {
@@ -1747,6 +1749,7 @@ TRANS = {
         "tt_more_accurate": "Mit dieser Option können Sie vor der Transkription ein Skript einfügen/importieren.\nSchlüsselwörter werden aus diesem Skript extrahiert und dann an Whisper\n(das Audio-Transkriptionsmodell) übergeben, wodurch die Transkription genauer wird.\n\nDiese Option wird besonders für rein technische Skripte empfohlen, die viele Wörter\nmit nicht-phonetischer Schreibweise enthalten (z. B. Systempfade, Namen mit\nZahlen, Sonderzeichen usw.).\n\nZusätzlich führt diese Option automatisch den Transkript-Skript-Vergleichsalgorithmus aus,\nsodass nach Abschluss der Transkription die Farben sofort sichtbar sind und die\nSide-by-Side-Ansicht sofort geladen wird.",
         "tt_jump_to_word_info": "Springt mit dem DaVinci-Playhead genau an den Moment, an dem das angeklickte Wort gesprochen wurde.\n\nVerfügbare Tastenkürzel:\nSTRG/ALT/UMSCHALT + Links-/Rechtsklick.",        "ph_support_email": "Ihre E-Mail-Adresse (Optional)",
         "btn_copy_path": "Pfad kopieren",
+        "msg_audio_preview_unavailable": "Audiovorschau nicht verfügbar bis zur nächsten Transkription.",
 
     },
     'es': {
@@ -2113,6 +2116,7 @@ TRANS = {
         "tt_more_accurate": "Esta opción le permite pegar/importar un guión antes de la transcripción.\nSe extraen palabras clave de este guión y luego se introducen en Whisper\n(el modelo de transcripción de audio), haciendo que la transcripción sea más precisa.\n\nEsta opción es muy recomendada para guiones estrictamente técnicos que\ncontienen muchas palabras con ortografía no fonética (por ejemplo, rutas de\nsistema, nombres con números, caracteres especiales, etc.).\n\nAdemás, esta opción ejecuta automáticamente el algoritmo de comparación de\ntranscripción y guión, por lo que una vez completada la transcripción, los colores\nson visibles de inmediato y la vista de lado a lado se carga al instante.",
         "tt_jump_to_word_info": "Salta el cabezal de reproducción de DaVinci al momento exacto en que se pronunció la palabra clickeada.\n\nAtajos disponibles:\nCTRL/ALT/MAYÚS + Clic Izquierdo/Derecho.",        "ph_support_email": "Tu correo electrónico (Opcional)",
         "btn_copy_path": "Copiar ruta",
+        "msg_audio_preview_unavailable": "Vista previa de audio no disponible hasta la próxima transcripción.",
 
     },
     'fr': {
@@ -2479,6 +2483,7 @@ TRANS = {
         "tt_more_accurate": "Cette option vous permet de coller/importer un script avant la transcription.\nLes mots-clés sont extraits de ce script puis fournis à Whisper (le modèle de\ntranscription audio), rendant la transcription plus précise.\n\nCette option est fortement recommandée pour les scripts strictement techniques\ncontenant de nombreux mots avec des orthographes non phonétiques (ex. chemins\nsystème, noms avec des chiffres, caractères spéciaux, etc.).\n\nDe plus, cette option exécute automatiquement l'algorithme de comparaison\ntranscription-script, ainsi, après la fin de la transcription, les couleurs sont\nimmédiatement visibles et la vue côte à côte se charge instantanément.",
         "tt_jump_to_word_info": "Déplace la tête de lecture de DaVinci au moment exact où le mot cliqué a été prononcé.\n\nRaccourcis disponibles :\nCTRL/ALT/MAJ + Clic Gauche/Droit.",        "ph_support_email": "Votre adresse e-mail (Facultatif)",
         "btn_copy_path": "Copier le chemin",
+        "msg_audio_preview_unavailable": "Aperçu audio indisponible jusqu'à la prochaine transcription.",
 
     },
     'it': {
@@ -2845,6 +2850,7 @@ TRANS = {
         "tt_more_accurate": "Questa opzione ti consente di incollare/importare uno script prima della trascrizione.\nLe parole chiave vengono estratte da questo script e poi fornite a Whisper (il modello\ndi trascrizione audio), rendendo la trascrizione più accurata.\n\nQuesta opzione è altamente raccomandata per script strettamente tecnici contenenti\nmolte parole con ortografia non fonetica (es. percorsi di sistema, nomi con\nnumeri, caratteri speciali, ecc.).\n\nInoltre, questa opzione esegue automaticamente l'algoritmo di confronto\ntrascrizione-script, quindi, una volta completata la trascrizione, i colori sono\nImmediatamente visibili e la visualizzazione affiancata si carica all'istante.",
         "tt_jump_to_word_info": "Sposta il cursore di riproduzione di DaVinci nel momento esatto in cui è stata pronunciata la parola cliccata.\n\nScorciatoie disponibili:\nCTRL/ALT/MAIUSC + Clic Sinistro/Destro.",        "ph_support_email": "Il tuo indirizzo email (Opzionale)",
         "btn_copy_path": "Copia percorso",
+        "msg_audio_preview_unavailable": "Anteprima audio non disponibile fino alla prossima trascrizione.",
 
     },
     'pt': {
@@ -3211,6 +3217,7 @@ TRANS = {
         "tt_more_accurate": "Esta opção permite colar/importar um roteiro antes da transcrição.\nPalavras-chave são extraídas deste roteiro e depois fornecidas ao Whisper\n(o modelo de transcrição de áudio), tornando a transcrição mais precisa.\n\nEsta opção é altamente recomendada para roteiros estritamente técnicos contendo\nmuitas palavras com grafias não fonéticas (ex., caminhos de sistema, nomes\ncom números, caracteres especiais, etc.).\n\nAlém disso, esta opção executa automaticamente o algoritmo de comparação\ntranscrição-roteiro, então, após a conclusão da transcrição, as cores são\nimediatamente visíveis e a visualização lado a lado carrega instantaneamente.",
         "tt_jump_to_word_info": "Salta o cursor do DaVinci para o momento exato em que a palavra clicada foi dita.\n\nAtalhos disponíveis:\nCTRL/ALT/SHIFT + Clique Esquerdo/Direito.",        "ph_support_email": "Seu endereço de e-mail (Opcional)",
         "btn_copy_path": "Copiar caminho",
+        "msg_audio_preview_unavailable": "Pré-visualização de áudio indisponível até a próxima transcrição.",
 
     },
     'nl': {
@@ -3577,6 +3584,7 @@ TRANS = {
         "tt_more_accurate": "Met deze optie kun je voor de transcriptie een script plakken/importeren.\nSleutelwoorden worden uit dit script gehaald en aan Whisper (het audiotranscriptiemodel)\ngeleverd, waardoor de transcriptie nauwkeuriger wordt.\n\nDeze optie wordt ten zeerste aanbevolen voor strikt technische scripts die veel\nwoorden bevatten met een niet-fonetische spelling (bijv. systeempaden, namen met\ncijfers, speciale tekens, enz.).\n\nBovendien voert deze optie automatisch het algoritme voor vergelijking van\ntranscript en script uit, dus na voltooiing van de transcriptie zijn de kleuren\nonmiddellijk zichtbaar en laadt de Side-by-side-weergave direct.",
         "tt_jump_to_word_info": "Springt met de DaVinci-afspeelkop precies naar het moment waarop het geklikte woord werd uitgesproken.\n\nBeschikbare sneltoetsen:\nCTRL/ALT/SHIFT + Linker/Rechter Muisklik.",        "ph_support_email": "Jouw e-mailadres (Optioneel)",
         "btn_copy_path": "Pad kopiëren",
+        "msg_audio_preview_unavailable": "Audiovoorbeeld niet beschikbaar tot de volgende transcriptie.",
 
     },
     'uk': {
@@ -3943,6 +3951,7 @@ TRANS = {
         "tt_more_accurate": "Ця опція дозволяє вставити/імпортувати сценарій перед транскрипцією.\nКлючові слова витягуються з цього сценарію, а потім передаються в Whisper\n(модель транскрипції аудіо), що робить транскрипцію точнішою.\n\nЦя опція настійно рекомендується для суто технічних сценаріїв, що містять\nбагато слів з нефонетичним написанням (наприклад, системні шляхи, назви\nз цифрами, спеціальні символи тощо).\n\nКрім того, ця опція автоматично запускає алгоритм порівняння транскрипту\nзі сценарієм, тому після завершення транскрипції кольори відразу видно,\nа вигляд Side-by-side завантажується миттєво.",
         "tt_jump_to_word_info": "Переміщує курсор (playhead) DaVinci на точний момент, коли було вимовлено вибране слово.\n\nДоступні комбінації:\nCTRL/ALT/SHIFT + Лівий/Правий клік.",        "ph_support_email": "Ваша електронна адреса (необов'язково)",
         "btn_copy_path": "Копіювати шлях",
+        "msg_audio_preview_unavailable": "Попередній перегляд аудіо недоступний до наступної транскрипції.",
 
     },
     'ru': {
@@ -4309,6 +4318,7 @@ TRANS = {
         "tt_more_accurate": "Эта опция позволяет вставить/импортировать сценарий перед транскрипцией.\nКлючевые слова извлекаются из этого сценария и затем передаются в Whisper\n(модель транскрипции аудио), делая транскрипцию более точной.\n\nЭта опция настоятельно рекомендуется для строго технических сценариев, содержащих\nмного слов с нефонетическим написанием (например, системные пути, названия с\nцифрами, специальные символы и т. д.).\n\nКроме того, эта опция автоматически запускает алгоритм сравнения транскрипта\nсо сценарием, поэтому после завершения транскрипции цвета сразу видны,\nа вид Side-by-side загружается мгновенно.",
         "tt_jump_to_word_info": "Перемещает курсор (playhead) DaVinci на точный момент, когда было произнесено выбранное слово.\n\nДоступные сочетания:\nCTRL/ALT/SHIFT + Левый/Правый клик.",        "ph_support_email": "Ваш адрес электронной почты (необязательно)",
         "btn_copy_path": "Копировать путь",
+        "msg_audio_preview_unavailable": "Предпросмотр аудио недоступен до следующей транскрипции.",
 
     }
 }

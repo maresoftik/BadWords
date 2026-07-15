@@ -1434,6 +1434,470 @@ class SearchOverlayWidget(QFrame):
             osdoc.log_error(f"Search positioning error: {str(e)}")
 
 
+class AudioPreviewWidget(QFrame):
+    def __init__(self, parent_widget, main_window):
+        super().__init__(parent_widget)
+        self.main_window = main_window
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QComboBox, QSlider, QLabel, QWidget
+        from PySide6.QtCore import Qt, QUrl, QTimer, QEvent
+        from PySide6.QtGui import QColor, QFont
+        from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+        import os
+
+        self.setObjectName("AudioPreview")
+        self.setStyleSheet(f"""
+            QFrame#AudioPreview {{
+                background-color: {config.SIDEBAR_BG};
+                border: 1px solid {config.SEPARATOR_COL};
+                border-radius: 14px;
+            }}
+            QWidget#AudioControls {{
+                background: transparent;
+            }}
+            QWidget {{
+                background: transparent;
+            }}
+            QPushButton {{
+                background: transparent;
+                border: none;
+                color: #b0b0b0;
+                font-weight: 600;
+                font-size: 14px;
+                padding: 6px 10px;
+                border-radius: 8px;
+            }}
+            QPushButton:hover {{
+                background: rgba(255, 255, 255, 0.08);
+                color: #ffffff;
+            }}
+            QPushButton:pressed {{
+                background: rgba(255, 255, 255, 0.06);
+            }}
+            QPushButton#PlayBtn {{
+                background-color: {config.BTN_BG};
+                color: #ffffff;
+                border-radius: 20px;
+                font-size: 16px;
+            }}
+            QPushButton#PlayBtn:hover {{
+                background-color: {config.BTN_ACTIVE};
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+                color: #b0b0b0;
+                font-size: 13px;
+            }}
+            QComboBox {{
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 6px;
+                color: #d0d0d0;
+                padding: 4px 10px;
+                font-size: 12px;
+            }}
+            QComboBox:hover {{
+                border: 1px solid rgba(255, 255, 255, 0.15);
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 0px;
+            }}
+            QSlider::groove:horizontal {{
+                height: 4px;
+                background: rgba(255, 255, 255, 0.10);
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                background: #d0d0d0;
+                width: 10px;
+                margin: -3px 0;
+                border-radius: 5px;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: #ffffff;
+            }}
+            QSlider#SeekSlider::groove:horizontal {{
+                height: 3px;
+                background: rgba(255, 255, 255, 0.08);
+                border-radius: 1px;
+            }}
+            QSlider#SeekSlider::sub-page:horizontal {{
+                background: {config.BTN_BG};
+                border-radius: 1px;
+            }}
+            QSlider#SeekSlider::handle:horizontal {{
+                background: #ffffff;
+                width: 8px;
+                margin: -3px 0;
+                border-radius: 4px;
+            }}
+            QLabel#TimeLabel {{
+                font-family: 'JetBrains Mono', 'Consolas', 'Menlo', monospace;
+                font-size: 11px;
+                color: #707070;
+                letter-spacing: 0.5px;
+            }}
+            QLabel#StatusLabel {{
+                color: #666666;
+                font-style: italic;
+                font-size: 12px;
+            }}
+        """)
+
+        from PySide6.QtWidgets import QVBoxLayout
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(4)
+
+        self.lbl_status = QLabel("")
+        self.lbl_status.setObjectName("StatusLabel")
+        self.lbl_status.hide()
+        layout.addWidget(self.lbl_status)
+
+        # Seek slider (top row)
+        self.slider_seek = QSlider(Qt.Horizontal)
+        self.slider_seek.setObjectName("SeekSlider")
+        self.slider_seek.setRange(0, 1000)
+        self.slider_seek.setValue(0)
+        self._seek_dragging = False
+        self.slider_seek.sliderPressed.connect(self._on_seek_pressed)
+        self.slider_seek.sliderReleased.connect(self._on_seek_released)
+        self.slider_seek.sliderMoved.connect(self._on_seek_moved)
+        layout.addWidget(self.slider_seek)
+
+        self.controls_widget = QWidget()
+        self.controls_widget.setObjectName("AudioControls")
+        controls_layout = QHBoxLayout(self.controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(8)
+        
+        # Left controls (Volume & Speed)
+        left_widget = QWidget()
+        left_layout = QHBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(6)
+        self.cb_speed = QComboBox()
+        self.cb_speed.addItems(["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x", "3.0x"])
+        self.cb_speed.setCurrentText("1.0x")
+        self.cb_speed.setFixedWidth(60)
+        
+        self.slider_vol = QSlider(Qt.Horizontal)
+        self.slider_vol.setRange(0, 100)
+        self.slider_vol.setValue(100)
+        self.slider_vol.setFixedWidth(60)
+        
+        self.lbl_vol_icon = QLabel("🔊")
+        self.lbl_vol_icon.setFixedWidth(20)
+        left_layout.addWidget(self.lbl_vol_icon)
+        left_layout.addWidget(self.slider_vol)
+        left_layout.addSpacing(4)
+        left_layout.addWidget(self.cb_speed)
+        
+        # Center controls (Playback)
+        center_widget = QWidget()
+        center_layout = QHBoxLayout(center_widget)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(16)
+        
+        self.btn_prev = QPushButton("⏮")
+        self.btn_prev.setFixedSize(32, 32)
+        self.btn_play = QPushButton("▶")
+        self.btn_play.setObjectName("PlayBtn")
+        self.btn_play.setFixedSize(40, 40)
+        self.btn_next = QPushButton("⏭")
+        self.btn_next.setFixedSize(32, 32)
+        
+        center_layout.addWidget(self.btn_prev)
+        center_layout.addWidget(self.btn_play)
+        center_layout.addWidget(self.btn_next)
+        
+        # Right controls (Time)
+        right_widget = QWidget()
+        right_layout = QHBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.lbl_time = QLabel("00:00 / 00:00")
+        self.lbl_time.setObjectName("TimeLabel")
+        self.lbl_time.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_time.setFixedWidth(100)
+        
+        right_layout.addWidget(self.lbl_time)
+        
+        controls_layout.addWidget(left_widget, 1, Qt.AlignLeft)
+        controls_layout.addStretch()
+        controls_layout.addWidget(center_widget, 0, Qt.AlignCenter)
+        controls_layout.addStretch()
+        controls_layout.addWidget(right_widget, 1, Qt.AlignRight)
+
+        layout.addWidget(self.controls_widget)
+
+        self.player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.player.setAudioOutput(self.audio_output)
+        self.audio_output.setVolume(1.0)
+
+        self.btn_play.clicked.connect(self.toggle_play)
+        self.btn_prev.clicked.connect(self.skip_backward)
+        self.btn_next.clicked.connect(self.skip_forward)
+        self.slider_vol.valueChanged.connect(lambda v: self.audio_output.setVolume(v / 100.0))
+        self.cb_speed.currentTextChanged.connect(self.change_speed)
+
+        self.update_timer = QTimer(self)
+        self.update_timer.setInterval(16)
+        self.update_timer.timeout.connect(self.sync_playback)
+
+        self.player.playbackStateChanged.connect(self.on_state_changed)
+        
+        self.current_word_idx = -1
+        self.last_jumped_ts = -1.0
+        self.original_audio_path = None
+        self._source_audio_path = None
+        self.clean_ops = None
+        
+        if parent_widget:
+            parent_widget.installEventFilter(self)
+
+        self.hide()
+        QTimer.singleShot(0, self._reposition)
+
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+        if obj == self.parentWidget() and event.type() == QEvent.Resize:
+            self._reposition()
+        return super().eventFilter(obj, event)
+
+    def _reposition(self):
+        try:
+            if not self.parentWidget(): return
+            parent_w = self.parentWidget().width()
+            parent_h = self.parentWidget().height()
+            w = min(620, parent_w - 40)
+            h = 85
+            self.setGeometry(parent_w // 2 - w // 2, parent_h - h - 20, w, h)
+        except Exception:
+            pass
+
+    def check_audio_availability(self):
+        import os
+        canvas = getattr(self.main_window, 'text_canvas', None)
+        if not canvas or not getattr(canvas, 'words_data', None):
+            self.hide()
+            return
+            
+        words = canvas.words_data
+        audio_path = words[0].get('meta_audio_path') if words else None
+        
+        if not audio_path or not os.path.exists(audio_path):
+            self.lbl_status.setText(self.main_window.txt("msg_audio_preview_unavailable"))
+            self.lbl_status.show()
+            self.controls_widget.hide()
+            self.slider_seek.hide()
+            self.show()
+            self.raise_()
+            self._reposition()
+            return
+        
+        # If assembled audio is loaded for this same source, don't revert
+        if audio_path == self._source_audio_path and self.clean_ops is not None:
+            if self.original_audio_path and os.path.exists(self.original_audio_path):
+                self.lbl_status.hide()
+                self.controls_widget.show()
+                self.slider_seek.show()
+                self.show()
+                self.raise_()
+                self._reposition()
+                return
+            
+        self.lbl_status.hide()
+        self.controls_widget.show()
+        self.slider_seek.show()
+        self.show()
+        self.raise_()
+        self._reposition()
+        
+        if self._source_audio_path != audio_path:
+            self._source_audio_path = audio_path
+            self.original_audio_path = audio_path
+            from PySide6.QtCore import QUrl
+            self.player.setSource(QUrl.fromLocalFile(audio_path))
+            self.clean_ops = None
+            self.current_word_idx = -1
+            self.last_jumped_ts = -1.0
+            self.slider_seek.setValue(0)
+            
+    def load_assembled_audio(self, assembled_audio_path, clean_ops):
+        import os
+        from PySide6.QtCore import QUrl
+        if os.path.exists(assembled_audio_path):
+            self.original_audio_path = assembled_audio_path
+            self.clean_ops = clean_ops
+            self.player.setSource(QUrl.fromLocalFile(assembled_audio_path))
+            self.lbl_status.hide()
+            self.controls_widget.show()
+            self.slider_seek.show()
+            self.slider_seek.setValue(0)
+            self.current_word_idx = -1
+            self.last_jumped_ts = -1.0
+            self._clear_highlights()
+            self.show()
+            self.raise_()
+            self._reposition()
+
+    def set_position_ms(self, ms):
+        import time
+        self.player.setPosition(ms)
+        self._start_pos_s = ms / 1000.0
+        self._real_start_time = time.time()
+        self.sync_playback()
+
+        
+    def _get_audio_t(self):
+        from PySide6.QtMultimedia import QMediaPlayer
+        import time
+        if self.player.playbackState() != QMediaPlayer.PlayingState:
+            return self.player.position() / 1000.0
+        return getattr(self, '_start_pos_s', 0.0) + (time.time() - getattr(self, '_real_start_time', 0.0)) * self.player.playbackRate()
+
+    def toggle_play(self):
+        from PySide6.QtMultimedia import QMediaPlayer
+        import time
+        if self.player.playbackState() == QMediaPlayer.PlayingState:
+            self.player.pause()
+        else:
+            self._start_pos_s = self.player.position() / 1000.0
+            self._real_start_time = time.time()
+            self.player.play()
+            self.update_timer.start()
+
+    def on_state_changed(self, state):
+        from PySide6.QtMultimedia import QMediaPlayer
+        if state == QMediaPlayer.PlayingState:
+            self.btn_play.setText("⏸")
+            self.update_timer.start()
+        else:
+            self.btn_play.setText("▶")
+            self.update_timer.stop()
+            if state == QMediaPlayer.StoppedState:
+                self._clear_highlights()
+
+    def skip_forward(self):
+        curr_t = self._get_audio_t()
+        self.set_position_ms(int((curr_t + 3.0) * 1000))
+
+    def skip_backward(self):
+        curr_t = self._get_audio_t()
+        self.set_position_ms(int(max(0.0, curr_t - 3.0) * 1000))
+
+    def change_speed(self, text):
+        from PySide6.QtMultimedia import QMediaPlayer
+        import time
+        if not text.endswith("x"):
+            return
+        try:
+            new_rate = float(text[:-1])
+        except ValueError:
+            return
+        if self.player.playbackState() == QMediaPlayer.PlayingState:
+            self._start_pos_s = self._get_audio_t()
+            self._real_start_time = time.time()
+        self.player.setPlaybackRate(new_rate)
+
+    def _on_seek_pressed(self):
+        self._seek_dragging = True
+
+    def _on_seek_released(self):
+        self._seek_dragging = False
+        dur = self.player.duration()
+        if dur > 0:
+            ms = int(self.slider_seek.value() / 1000.0 * dur)
+            self.set_position_ms(ms)
+
+    def _on_seek_moved(self, value):
+        dur = self.player.duration()
+        if dur > 0:
+            t = value / 1000.0 * dur / 1000.0
+            cur_m, cur_s = divmod(int(t), 60)
+            dur_m, dur_s = divmod(int(dur / 1000.0), 60)
+            self.lbl_time.setText(f"{cur_m:02d}:{cur_s:02d} / {dur_m:02d}:{dur_s:02d}")
+
+    def _audio_to_original_time(self, audio_t):
+        if not self.clean_ops: return audio_t
+        fps = getattr(self.main_window.resolve_handler, 'fps', 24.0)
+        audio_frames = audio_t * fps
+        current_audio_f = 0
+        for op in self.clean_ops:
+            dur = op['e'] - op['s']
+            if current_audio_f <= audio_frames < current_audio_f + dur:
+                return (op['s'] + (audio_frames - current_audio_f)) / fps
+            current_audio_f += dur
+        if self.clean_ops: return self.clean_ops[-1]['e'] / fps
+        return audio_t
+
+    def _original_to_audio_time(self, orig_t):
+        if not self.clean_ops: return orig_t
+        fps = getattr(self.main_window.resolve_handler, 'fps', 24.0)
+        orig_frames = orig_t * fps
+        current_audio_f = 0
+        for op in self.clean_ops:
+            if orig_frames < op['s']:
+                break
+            if op['s'] <= orig_frames <= op['e']:
+                return (current_audio_f + (orig_frames - op['s'])) / fps
+            current_audio_f += (op['e'] - op['s'])
+        return current_audio_f / fps
+
+    def sync_playback(self):
+        canvas = getattr(self.main_window, 'text_canvas', None)
+        if not canvas or not getattr(canvas, 'words_data', None): return
+        
+        audio_t = max(0.0, self._get_audio_t())
+        orig_t = self._audio_to_original_time(audio_t) if self.clean_ops else audio_t
+        
+        dur = self.player.duration() / 1000.0
+        cur_m, cur_s = divmod(int(audio_t), 60)
+        dur_m, dur_s = divmod(int(dur), 60)
+        self.lbl_time.setText(f"{cur_m:02d}:{cur_s:02d} / {dur_m:02d}:{dur_s:02d}")
+        
+        # Update seek slider position (skip if user is dragging)
+        if not self._seek_dragging and dur > 0:
+            self.slider_seek.setValue(int(audio_t / dur * 1000))
+            
+        found_idx = -1
+        # Lookahead compensates for audio pipeline output latency (~100-200ms)
+        match_t = orig_t + 0.15
+        for i in range(len(canvas.words_data)):
+            start_t = canvas.words_data[i].get('start', 0)
+            if start_t > match_t:
+                found_idx = i - 1
+                break
+        else:
+            if canvas.words_data:
+                found_idx = len(canvas.words_data) - 1
+                
+        if found_idx >= 0 and canvas.words_data[found_idx].get('type') == 'silence':
+            pass
+        elif found_idx != self.current_word_idx:
+            self._clear_highlights()
+            self.current_word_idx = found_idx
+            if found_idx >= 0:
+                w = canvas.words_data[found_idx]
+                w['_audio_active'] = True
+                canvas.update()
+                
+                start_ts = w.get('start', 0)
+                if abs(start_ts - self.last_jumped_ts) > 0.05:
+                    self.last_jumped_ts = start_ts
+                    # Playhead jump is purely manual via CTRL+LPM now.
+                        
+    def _clear_highlights(self):
+        canvas = getattr(self.main_window, 'text_canvas', None)
+        if canvas and canvas.words_data:
+            for w in canvas.words_data:
+                w.pop('_audio_active', None)
+            canvas.update()
+
 # FIX KR-03: Zastąpiono WorkerSignals bezpieczną klasą dziedziczącą po QThread
 class AnalysisWorker(QThread):
     progress = Signal(int)
@@ -2321,15 +2785,23 @@ class TranscriptionCanvas(QWidget):
             final_fg = w.get('_search_fg', fg)
             
             font = QFont(active_font)
-            if w.get('_is_bold'):
+            if w.get('_is_bold') or w.get('_audio_active'):
                 font.setBold(True)
+                
+            if w.get('_audio_active'):
+                p.setBrush(QColor("#ffffff"))
+                p.setPen(Qt.NoPen)
+                active_rect = w['_rect'].adjusted(-8, -2, 8, 2)
+                p.drawRoundedRect(active_rect, 6, 6)
+                final_fg = QColor("#222222")
                 
             if w.get('is_assembled_cut'):
                 final_fg = QColor("#5a5a5a")
                 
             p.setFont(font)
             p.setPen(final_fg)
-            p.drawText(w['_rect'], Qt.AlignCenter, w.get('_display_text', w.get('text', '')))
+            draw_rect = w['_rect'].adjusted(-20, 0, 20, 0) if w.get('_audio_active') else w['_rect']
+            p.drawText(draw_rect, Qt.AlignCenter, w.get('_display_text', w.get('text', '')))
             
             if w.get('is_assembled_cut'):
                 p.setPen(QPen(final_fg, 1.5))
@@ -2426,10 +2898,20 @@ class TranscriptionCanvas(QWidget):
                 for w in self._cached_visible_words:
                     if w.get('is_script_word') or w.get('is_script_bg') or w.get('is_script_placeholder'):
                         continue
-                    if '_rect' in w and w['_rect'].adjusted(-3, -1, 3, 1).contains(event.pos()):
+                    if '_rect' in w and w['_rect'].adjusted(-10, -5, 10, 5).contains(event.pos()):
+                        start_time = w.get('start', 0.0)
+                        
+                        if hasattr(self.main_window, 'audio_preview') and self.main_window.audio_preview.isVisible():
+                            audio_ts = self.main_window.audio_preview._original_to_audio_time(start_time)
+                            self.main_window.audio_preview.set_position_ms(int(audio_ts * 1000))
+                        else:
+                            audio_ts = start_time
+                            
                         if hasattr(self.main_window, '_jump_playhead'):
-                            self.main_window._jump_playhead(w.get('start', 0.0))
-                return
+                            from PySide6.QtCore import QTimer
+                            QTimer.singleShot(0, lambda t=audio_ts: self.main_window._jump_playhead(t))
+                        break
+                return  # Block painting if jump shortcut was used
 
         if event.button() == Qt.LeftButton:
             self._is_painting = True
@@ -8160,6 +8642,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
 
         self.undo_manager = UndoManager(self, self.text_canvas)
         self._setup_hardcoded_shortcuts()
+        
+        # Install global app event filter for robust media shortcuts
+        QApplication.instance().installEventFilter(self)
 
         self._active_shortcuts = []  # track dynamic QShortcuts for cleanup
         self._apply_dynamic_shortcuts()
@@ -8378,6 +8863,8 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self._main_h_splitter.setStretchFactor(0, 0)
         self._main_h_splitter.setStretchFactor(1, 1)
         self._main_h_splitter.setStretchFactor(2, 0)
+
+        self.audio_preview = AudioPreviewWidget(self._stack.widget(2), self)
         self._main_h_splitter.setHandleWidth(10)
         self._main_h_splitter.setStyleSheet("QSplitter { border: none; background: transparent; }")
 
@@ -8977,11 +9464,27 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self.btn_export_proj.clicked.connect(self._on_export_project)
         
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit
+        
+        if event.type() == QEvent.Type.KeyPress:
+            # Global intercept for media keys (Space, Left, Right)
+            if event.key() in (Qt.Key_Space, Qt.Key_Left, Qt.Key_Right):
+                fw = self.focusWidget()
+                if not isinstance(fw, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                    if hasattr(self, 'audio_preview') and getattr(self.audio_preview, 'isVisible', lambda: False)():
+                        if event.key() == Qt.Key_Space:
+                            self.audio_preview.toggle_play()
+                        elif event.key() == Qt.Key_Left:
+                            self.audio_preview.skip_backward()
+                        elif event.key() == Qt.Key_Right:
+                            self.audio_preview.skip_forward()
+                        return True  # Consume the event
+                        
         if event.type() == QEvent.Type.Enter:
             if watched == getattr(self, 'btn_analyze_standalone', None):
                 self.shared_tooltip.show_at(watched, self.txt("tooltip_standalone"), is_right_side=False)
             elif watched == getattr(self, 'btn_clear_transcript', None):
-                # CRITICAL: is_right_side=True forces it to render to the left of the button!
                 self.shared_tooltip.show_at(watched, self.txt("tooltip_clear_all_markings"), is_right_side=True)
         elif event.type() == QEvent.Type.Leave:
             if watched in (getattr(self, 'btn_analyze_standalone', None), getattr(self, 'btn_clear_transcript', None)):
@@ -9007,7 +9510,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
             
         if tl_name:
             curr_tl = self.engine.resolve_handler.project.GetCurrentTimeline()
-            if not curr_tl or curr_tl.GetName() != tl_name:
+            if curr_tl and curr_tl.GetName() == tl_name:
+                self.engine.resolve_handler.timeline = curr_tl
+            else:
                 count = self.engine.resolve_handler.project.GetTimelineCount()
                 for i in range(1, count + 1):
                     tl = self.engine.resolve_handler.project.GetTimelineByIndex(i)
@@ -9471,6 +9976,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
                 else:
                     self._title_bar.chapter_dropdown.hide()
                 self._title_bar.update_dropdown_placement()
+                
+            if hasattr(self, 'audio_preview'):
+                self.audio_preview.check_audio_availability()
 
             # --- SWITCH TO EDITOR CONTEXT AND OPEN PANELS IF NEEDED ---
             if from_main_window:
@@ -10014,7 +10522,14 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
                 except Exception:
                     pass
 
-        # RAM cleanup
+        if success:
+            self.lbl_processing_status.setText(self.txt("txt_finishing"))
+            QApplication.processEvents()
+            self._on_assembly_success(new_tl_name, clean_ops)
+        else:
+            self._on_assembly_error(self.txt("msg_assembly_failed"))
+
+        # RAM cleanup — MUST happen AFTER success/error handler so _assembly_prefs is available
         try:
             import gc
             self._assembly_thread = None
@@ -10024,16 +10539,67 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         except Exception:
             pass
 
-        if success:
-            self.lbl_processing_status.setText(self.txt("txt_finishing"))
-            QApplication.processEvents()
-            self._on_assembly_success(new_tl_name, clean_ops)
-        else:
-            self._on_assembly_error(self.txt("msg_assembly_failed"))
-
 
     def _on_assembly_success(self, new_tl_name, clean_ops):
         if hasattr(self, 'go_to_page'): self.go_to_page(2)
+        
+        # Audio preview mapping
+        if hasattr(self, 'audio_preview') and getattr(self, '_assembly_prefs', None):
+            words = self._get_clean_words_data()
+            if words and words[0].get('meta_audio_path'):
+                audio_path = words[0].get('meta_audio_path')
+                import os
+                if clean_ops:
+                    fps = getattr(self.resolve_handler, 'fps', 24.0)
+                    ffmpeg_cmd = self.engine.os_doc.get_ffmpeg_cmd()
+                    if ffmpeg_cmd and os.path.exists(audio_path):
+                        assembled_audio_path = audio_path.replace(".wav", "_assembled.wav")
+                        from PySide6.QtCore import QThread, Signal
+                        import tempfile
+                        
+                        class FFmpegCutThread(QThread):
+                            finished = Signal(str, list)
+                            def __init__(self, parent, cmd, out_path, ops, list_file_path=None):
+                                super().__init__(parent)
+                                self.cmd = cmd
+                                self.out_path = out_path
+                                self.ops = ops
+                                self.list_file_path = list_file_path
+                            def run(self):
+                                import subprocess
+                                import os
+                                try:
+                                    res = subprocess.run(self.cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                    self.finished.emit(self.out_path, self.ops)
+                                except subprocess.CalledProcessError as e:
+                                    from osdoc import log_error
+                                    log_error(f"FFmpeg assembly failed: {e.stderr}")
+                                except Exception as e:
+                                    from osdoc import log_error
+                                    log_error(f"FFmpeg assembly exception: {e}")
+                                finally:
+                                    if self.list_file_path and os.path.exists(self.list_file_path):
+                                        try: os.remove(self.list_file_path)
+                                        except: pass
+
+                        list_fd, list_path = tempfile.mkstemp(suffix=".txt", text=True)
+                        import os
+                        with os.fdopen(list_fd, 'w') as f:
+                            for op in clean_ops:
+                                start_s = op['s'] / fps
+                                end_s = op['e'] / fps
+                                f.write(f"file '{audio_path}'\ninpoint {start_s:.6f}\noutpoint {end_s:.6f}\n")
+                        
+                        cmd = [
+                            ffmpeg_cmd, "-y", "-f", "concat", "-safe", "0",
+                            "-i", list_path, "-c", "copy", assembled_audio_path
+                        ]
+                        
+                        self._ffmpeg_thread = FFmpegCutThread(self, cmd, assembled_audio_path, clean_ops, list_path)
+                        self._ffmpeg_thread.finished.connect(self.audio_preview.load_assembled_audio)
+                        self._ffmpeg_thread.start()
+                else:
+                    self.audio_preview.check_audio_availability()
         
         is_sbs = getattr(self.text_canvas, 'is_sbs_mode', False)
         if hasattr(self, '_panel_left') and not is_sbs: self._panel_left.show()
@@ -11242,6 +11808,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
 
         self._populate_editor(words_data, segments_data)
         
+        if hasattr(self, 'audio_preview'):
+            self.audio_preview.check_audio_availability()
+        
         # Load pre-calculated SBS cache if it exists (from initial transcript auto-compare)
         if getattr(self.engine, 'sbs_cache', None):
             self._sbs_last_script_hash = self.engine.sbs_cache.get('hash')
@@ -11509,7 +12078,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
 
         def _make(seq, slot):
             """Helper: register one QShortcut with ApplicationShortcut context."""
-            if not seq or seq in ('', 'Ctrl+RMB', 'Space'):
+            if not seq or seq in ('', 'Ctrl+RMB'):
                 return
             try:
                 sc = QShortcut(QKeySequence(seq), self, context=Qt.ApplicationShortcut)
@@ -11524,6 +12093,16 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         # open_settings — open settings dialog (default: Escape)
         # Note: Escape also closes search; handled by priority in event chain
         _make(shortcuts.get('open_settings', 'Escape'), self._on_settings)
+        
+        def safe_toggle_play():
+            from PySide6.QtWidgets import QApplication, QLineEdit, QTextEdit, QPlainTextEdit
+            focus_widget = QApplication.focusWidget()
+            if isinstance(focus_widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                return
+            if hasattr(self, 'audio_preview') and self.audio_preview.isVisible():
+                self.audio_preview.toggle_play()
+
+        _make(shortcuts.get('play_stop', 'Space'), safe_toggle_play)
 
         # Marker shortcuts — click the corresponding radio button
         def _check_rb(rb):
