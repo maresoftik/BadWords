@@ -459,44 +459,53 @@ class QLabel(_QLabel):
 
 
 class GripHandle(QSplitterHandle):
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        from PySide6.QtCore import QVariantAnimation
+        self.setAttribute(Qt.WA_Hover)
+        self._pressed = False
+        self._anim_val = 0.0
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(150)
+        self._anim.valueChanged.connect(self._on_anim_value)
+        
+    def _on_anim_value(self, val):
+        self._anim_val = val
+        self.update()
+
+    def mousePressEvent(self, event):
+        self._pressed = True
+        self._anim.stop()
+        self._anim.setStartValue(self._anim_val)
+        self._anim.setEndValue(1.0)
+        self._anim.start()
+        super().mousePressEvent(event)
+        
+    def mouseReleaseEvent(self, event):
+        self._pressed = False
+        self._anim.stop()
+        self._anim.setStartValue(self._anim_val)
+        self._anim.setEndValue(0.0)
+        self._anim.start()
+        super().mouseReleaseEvent(event)
+
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
         
-        w = self.width() # Expected to be 10
+        w = self.width() 
         h = self.height()
-        half_w = w // 2  # Exactly 5
-        
-        # BULLETPROOF CHECK: handle(1) is always between LeftPanel and Stack.
-        # If self is handle(1), it's the left sidebar grip. Else, it's the right one.
         is_left_handle = (self == self.splitter().handle(1))
         
-        # 1. 50/50 Seamless Background Split
-        if is_left_handle:
-            painter.fillRect(0, 0, half_w, h, QColor("#212121")) # Left half touches panel
-            painter.fillRect(half_w, 0, w - half_w, h, QColor("#1c1c1c")) # Right half touches workspace
-        else:
-            painter.fillRect(0, 0, half_w, h, QColor("#1c1c1c")) # Left half touches workspace
-            painter.fillRect(half_w, 0, w - half_w, h, QColor("#212121")) # Right half touches panel
-            
-        # 2. Draw the Grip Pill (Centered, perfectly bisected by the background split)
-        pill_width = 6
-        pill_height = 36
-        x = (w - pill_width) // 2
-        y = (h - pill_height) // 2
+        painter.fillRect(0, 0, w, h, QColor("#212121"))
         
-        painter.setBrush(QColor("#555555"))
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(x, y, pill_width, pill_height, 3, 3)
+        line_w = 1 + int(self._anim_val * 2)
+        x = (w - line_w) if is_left_handle else 0
         
-        # 3. Draw 3 Centered Dots
-        painter.setBrush(QColor("#aaaaaa"))
-        dot_size = 2
-        dot_x = x + (pill_width - dot_size) // 2
+        r = int(42 + (30 - 42) * self._anim_val)
+        g = int(42 + (215 - 42) * self._anim_val)
+        b = int(42 + (96 - 42) * self._anim_val)
         
-        painter.drawEllipse(dot_x, y + 8, dot_size, dot_size)
-        painter.drawEllipse(dot_x, y + 17, dot_size, dot_size)
-        painter.drawEllipse(dot_x, y + 26, dot_size, dot_size)
+        painter.fillRect(x, 0, line_w, h, QColor(r, g, b))
 
 class GripSplitter(QSplitter):
     def createHandle(self):
@@ -765,7 +774,7 @@ class ToggleSwitch(QWidget):
         if animated:
             self._update_animation()
         else:
-            self._bg_color = QColor(config.BTN_BG) if checked else QColor("#555555")
+            self._bg_color = QColor("#1ed760") if checked else QColor("#555555")
             self._thumb_x = self.width() - 20 if checked else 4
             self.update()
         
@@ -783,7 +792,7 @@ class ToggleSwitch(QWidget):
         self._color_anim.stop()
         
         end_x = 18 if self._is_checked else 2
-        end_color = QColor(config.BTN_BG) if self._is_checked else QColor("#555555")
+        end_color = QColor("#1ed760") if self._is_checked else QColor("#555555")
         
         self._anim_group.setEndValue(float(end_x))
         self._color_anim.setEndValue(end_color)
@@ -1434,10 +1443,100 @@ class SearchOverlayWidget(QFrame):
             osdoc.log_error(f"Search positioning error: {str(e)}")
 
 
+from PySide6.QtWidgets import QPushButton, QSlider
+
+class JumpSlider(QSlider):
+    def mousePressEvent(self, ev):
+        from PySide6.QtCore import Qt
+        if ev.button() == Qt.LeftButton:
+            val = self.minimum() + ((self.maximum() - self.minimum()) * ev.position().x()) / self.width()
+            self.setValue(int(val))
+            ev.accept()
+            self.sliderPressed.emit()
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        from PySide6.QtCore import Qt
+        if ev.buttons() & Qt.LeftButton:
+            val = self.minimum() + ((self.maximum() - self.minimum()) * ev.position().x()) / self.width()
+            self.setValue(int(val))
+            ev.accept()
+            return
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        from PySide6.QtCore import Qt
+        if ev.button() == Qt.LeftButton:
+            self.sliderReleased.emit()
+            ev.accept()
+            return
+        super().mouseReleaseEvent(ev)
+
+class AnimatedPlayerButton(QPushButton):
+    def __init__(self, icon_name, button_size=32, icon_size=24, parent=None):
+        super().__init__(parent)
+        from PySide6.QtCore import QSize, QPropertyAnimation
+        
+        self.base_icon_size = icon_size
+        self.setFixedSize(button_size, button_size)
+        self.setIconSize(QSize(icon_size, icon_size))
+        
+        self._anim = QPropertyAnimation(self, b"iconSize")
+        self._anim.setDuration(100)
+        
+        self.update_icon(icon_name)
+
+    def update_icon(self, icon_name):
+        from PySide6.QtGui import QIcon
+        import os
+        _src_dir = os.path.dirname(os.path.abspath(__file__))
+        _prod_assets_dir = os.path.join(_src_dir, "layout")
+        _dev_assets_dir = os.path.join(os.path.dirname(_src_dir), "assets", "layout")
+        _assets_dir = _prod_assets_dir if os.path.exists(_prod_assets_dir) else _dev_assets_dir
+        path = os.path.join(_assets_dir, icon_name)
+        
+        from PySide6.QtGui import QPixmap
+        from PySide6.QtCore import Qt
+        pix = QPixmap(path)
+        if not pix.isNull():
+            pix = pix.scaled(self.base_icon_size * 2, self.base_icon_size * 2, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.setIcon(QIcon(pix))
+        else:
+            self.setIcon(QIcon(path))
+
+    def mousePressEvent(self, e):
+        from PySide6.QtCore import QSize
+        self._anim.stop()
+        self._anim.setEndValue(QSize(int(self.base_icon_size * 0.75), int(self.base_icon_size * 0.75)))
+        self._anim.start()
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        from PySide6.QtCore import QSize
+        self._anim.stop()
+        self._anim.setEndValue(QSize(self.base_icon_size, self.base_icon_size))
+        self._anim.start()
+        super().mouseReleaseEvent(e)
+
+
 class AudioPreviewWidget(QFrame):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget)
         self.main_window = main_window
+        
+        import os
+        if os.name == 'posix':
+            # Changing application.name forces PulseAudio/PipeWire to create a NEW volume profile
+            # at 100%, completely bypassing the user's previously stuck 30% volume bug.
+            os.environ["PULSE_PROP_application.name"] = "BadWordsApp"
+            os.environ["PULSE_PROP_media.role"] = "production"
+            os.environ["QT_MEDIA_BACKEND"] = "gstreamer"
+        
+        if self.main_window and hasattr(self.main_window, 'scroll_area'):
+            vbar = self.main_window.scroll_area.verticalScrollBar()
+            vbar.actionTriggered.connect(self._on_user_scroll)
+            
         from PySide6.QtWidgets import QHBoxLayout, QPushButton, QComboBox, QSlider, QLabel, QWidget
         from PySide6.QtCore import Qt, QUrl, QTimer, QEvent
         from PySide6.QtGui import QColor, QFont
@@ -1447,9 +1546,12 @@ class AudioPreviewWidget(QFrame):
         self.setObjectName("AudioPreview")
         self.setStyleSheet(f"""
             QFrame#AudioPreview {{
-                background-color: {config.SIDEBAR_BG};
-                border: 1px solid {config.SEPARATOR_COL};
-                border-radius: 14px;
+                background-color: #191919;
+                border-top: 1px solid #2a2a2a;
+                border-radius: 0px;
+                border-left: none;
+                border-right: none;
+                border-bottom: none;
             }}
             QWidget#AudioControls {{
                 background: transparent;
@@ -1518,13 +1620,13 @@ class AudioPreviewWidget(QFrame):
                 background: #ffffff;
             }}
             QSlider#SeekSlider::groove:horizontal {{
-                height: 3px;
+                height: 4px;
                 background: rgba(255, 255, 255, 0.08);
-                border-radius: 1px;
+                border-radius: 2px;
             }}
             QSlider#SeekSlider::sub-page:horizontal {{
-                background: {config.BTN_BG};
-                border-radius: 1px;
+                background: #1ed760;
+                border-radius: 2px;
             }}
             QSlider#SeekSlider::handle:horizontal {{
                 background: #ffffff;
@@ -1548,88 +1650,158 @@ class AudioPreviewWidget(QFrame):
         from PySide6.QtWidgets import QVBoxLayout
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 8, 16, 8)
-        layout.setSpacing(4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         self.lbl_status = QLabel("")
         self.lbl_status.setObjectName("StatusLabel")
         self.lbl_status.hide()
         layout.addWidget(self.lbl_status)
 
-        # Seek slider (top row)
-        self.slider_seek = QSlider(Qt.Horizontal)
-        self.slider_seek.setObjectName("SeekSlider")
-        self.slider_seek.setRange(0, 1000)
-        self.slider_seek.setValue(0)
-        self._seek_dragging = False
-        self.slider_seek.sliderPressed.connect(self._on_seek_pressed)
-        self.slider_seek.sliderReleased.connect(self._on_seek_released)
-        self.slider_seek.sliderMoved.connect(self._on_seek_moved)
-        layout.addWidget(self.slider_seek)
-
         self.controls_widget = QWidget()
         self.controls_widget.setObjectName("AudioControls")
         controls_layout = QHBoxLayout(self.controls_widget)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
-        controls_layout.setSpacing(8)
+        controls_layout.setContentsMargins(16, 12, 16, 12)
+        controls_layout.setSpacing(16)
         
-        # Left controls (Volume & Speed)
+        # Left controls (Keep centered)
         left_widget = QWidget()
         left_layout = QHBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(6)
+        
+        self.tgl_centered = ToggleSwitch(parent=self)
+        self.tgl_centered.toggled.connect(self._on_tgl_centered_changed)
+        
+        self.lbl_centered = QLabel(self.main_window.txt("msg_keep_centered"))
+        self.lbl_centered.setStyleSheet("color: #b0b0b0; font-size: 13px;")
+        
+        left_layout.addWidget(self.tgl_centered)
+        left_layout.addSpacing(12)
+        left_layout.addWidget(self.lbl_centered)
+        left_layout.addStretch()
+        
+        self.lbl_vol_icon = QLabel()
+        self.lbl_vol_icon.setFixedSize(20, 20)
+        self.lbl_vol_icon.setAlignment(Qt.AlignCenter)
+        
+        self.slider_vol = JumpSlider(Qt.Horizontal)
+        self.slider_vol.setRange(0, 100)
+        self.slider_vol.setValue(100)
+        self.slider_vol.setFixedWidth(60)
+        
         self.cb_speed = QComboBox()
         self.cb_speed.addItems(["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x", "3.0x"])
         self.cb_speed.setCurrentText("1.0x")
         self.cb_speed.setFixedWidth(60)
         
-        self.slider_vol = QSlider(Qt.Horizontal)
-        self.slider_vol.setRange(0, 100)
-        self.slider_vol.setValue(100)
-        self.slider_vol.setFixedWidth(60)
+
         
-        self.lbl_vol_icon = QLabel("🔊")
-        self.lbl_vol_icon.setFixedWidth(20)
-        left_layout.addWidget(self.lbl_vol_icon)
-        left_layout.addWidget(self.slider_vol)
-        left_layout.addSpacing(4)
-        left_layout.addWidget(self.cb_speed)
-        
-        # Center controls (Playback)
+        # Center controls (Playback + Seek slider)
         center_widget = QWidget()
-        center_layout = QHBoxLayout(center_widget)
+        center_layout = QVBoxLayout(center_widget)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(16)
+        center_layout.setSpacing(8)
         
-        self.btn_prev = QPushButton("⏮")
-        self.btn_prev.setFixedSize(32, 32)
-        self.btn_play = QPushButton("▶")
+        play_layout = QHBoxLayout()
+        play_layout.setAlignment(Qt.AlignCenter)
+        
+        self.btn_prev = AnimatedPlayerButton("player-backward.png", button_size=32, icon_size=16)
+        self.btn_play = AnimatedPlayerButton("player-play.png", button_size=32, icon_size=16)
         self.btn_play.setObjectName("PlayBtn")
-        self.btn_play.setFixedSize(40, 40)
-        self.btn_next = QPushButton("⏭")
-        self.btn_next.setFixedSize(32, 32)
+        self.btn_play.setStyleSheet(f"""
+            QPushButton#PlayBtn {{
+                background-color: #ffffff;
+                border-radius: 16px;
+            }}
+            QPushButton#PlayBtn:hover {{
+                background-color: #e0e0e0;
+            }}
+        """)
+        self.btn_next = AnimatedPlayerButton("player-forward.png", button_size=32, icon_size=16)
         
-        center_layout.addWidget(self.btn_prev)
-        center_layout.addWidget(self.btn_play)
-        center_layout.addWidget(self.btn_next)
+        play_layout.addWidget(self.btn_prev)
+        play_layout.addSpacing(8)
+        play_layout.addWidget(self.btn_play)
+        play_layout.addSpacing(8)
+        play_layout.addWidget(self.btn_next)
         
-        # Right controls (Time)
+        self.slider_seek = JumpSlider(Qt.Horizontal)
+        self.slider_seek.setObjectName("SeekSlider")
+        self.slider_seek.setRange(0, 1000)
+        self.slider_seek.setValue(0)
+        self.slider_seek.setMinimumWidth(600)
+        self.slider_seek.setMaximumWidth(1200)
+        self._seek_dragging = False
+        self.slider_seek.sliderPressed.connect(self._on_seek_pressed)
+        self.slider_seek.sliderReleased.connect(self._on_seek_released)
+        self.slider_seek.sliderMoved.connect(self._on_seek_moved)
+        self.slider_seek.sliderMoved.connect(self._on_seek_moved)
+        
+        self.lbl_time_curr = QLabel("0:00")
+        self.lbl_time_curr.setObjectName("TimeLabel")
+        self.lbl_time_curr.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_time_curr.setFixedWidth(40)
+        
+        self.lbl_time_total = QLabel("0:00")
+        self.lbl_time_total.setObjectName("TimeLabel")
+        self.lbl_time_total.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.lbl_time_total.setFixedWidth(40)
+        
+        seek_layout = QHBoxLayout()
+        seek_layout.setAlignment(Qt.AlignCenter)
+        seek_layout.addWidget(self.lbl_time_curr)
+        seek_layout.addSpacing(8)
+        seek_layout.addWidget(self.slider_seek, 1)
+        seek_layout.addSpacing(8)
+        seek_layout.addWidget(self.lbl_time_total)
+        
+        center_layout.addLayout(play_layout)
+        center_layout.addLayout(seek_layout)
+        
+        # Right controls (Volume & Speed)
         right_widget = QWidget()
         right_layout = QHBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(6)
         
-        self.lbl_time = QLabel("00:00 / 00:00")
-        self.lbl_time.setObjectName("TimeLabel")
-        self.lbl_time.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.lbl_time.setFixedWidth(100)
+        self.cb_speed.setStyleSheet("""
+            QComboBox {
+                background: transparent;
+                border: none;
+                color: #b0b0b0;
+                font-weight: 600;
+                padding: 4px;
+            }
+            QComboBox:hover {
+                color: #1ed760;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 0px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1a1a1a;
+                border: 1px solid #333333;
+                selection-background-color: #2c2c2c;
+                selection-color: #1ed760;
+                color: #b0b0b0;
+                outline: 0px;
+                padding: 0px;
+            }
+            QComboBox QAbstractItemView::item {
+                min-height: 24px;
+            }
+        """)
         
-        right_layout.addWidget(self.lbl_time)
+        right_layout.addWidget(self.cb_speed)
+        right_layout.addSpacing(4)
+        right_layout.addWidget(self.lbl_vol_icon)
+        right_layout.addWidget(self.slider_vol)
         
-        controls_layout.addWidget(left_widget, 1, Qt.AlignLeft)
-        controls_layout.addStretch()
-        controls_layout.addWidget(center_widget, 0, Qt.AlignCenter)
-        controls_layout.addStretch()
-        controls_layout.addWidget(right_widget, 1, Qt.AlignRight)
+        controls_layout.addWidget(left_widget, 1, Qt.AlignLeft | Qt.AlignVCenter)
+        controls_layout.addWidget(center_widget, 3, Qt.AlignCenter)
+        controls_layout.addWidget(right_widget, 1, Qt.AlignRight | Qt.AlignVCenter)
 
         layout.addWidget(self.controls_widget)
 
@@ -1641,8 +1813,10 @@ class AudioPreviewWidget(QFrame):
         self.btn_play.clicked.connect(self.toggle_play)
         self.btn_prev.clicked.connect(self.skip_backward)
         self.btn_next.clicked.connect(self.skip_forward)
-        self.slider_vol.valueChanged.connect(lambda v: self.audio_output.setVolume(v / 100.0))
+        self.slider_vol.valueChanged.connect(self._on_volume_changed)
         self.cb_speed.currentTextChanged.connect(self.change_speed)
+        
+        self._on_volume_changed(100)
 
         self.update_timer = QTimer(self)
         self.update_timer.setInterval(16)
@@ -1656,28 +1830,7 @@ class AudioPreviewWidget(QFrame):
         self._source_audio_path = None
         self.clean_ops = None
         
-        if parent_widget:
-            parent_widget.installEventFilter(self)
-
         self.hide()
-        QTimer.singleShot(0, self._reposition)
-
-    def eventFilter(self, obj, event):
-        from PySide6.QtCore import QEvent
-        if obj == self.parentWidget() and event.type() == QEvent.Resize:
-            self._reposition()
-        return super().eventFilter(obj, event)
-
-    def _reposition(self):
-        try:
-            if not self.parentWidget(): return
-            parent_w = self.parentWidget().width()
-            parent_h = self.parentWidget().height()
-            w = min(620, parent_w - 40)
-            h = 85
-            self.setGeometry(parent_w // 2 - w // 2, parent_h - h - 20, w, h)
-        except Exception:
-            pass
 
     def check_audio_availability(self):
         import os
@@ -1693,10 +1846,7 @@ class AudioPreviewWidget(QFrame):
             self.lbl_status.setText(self.main_window.txt("msg_audio_preview_unavailable"))
             self.lbl_status.show()
             self.controls_widget.hide()
-            self.slider_seek.hide()
             self.show()
-            self.raise_()
-            self._reposition()
             return
         
         # If assembled audio is loaded for this same source, don't revert
@@ -1704,18 +1854,12 @@ class AudioPreviewWidget(QFrame):
             if self.original_audio_path and os.path.exists(self.original_audio_path):
                 self.lbl_status.hide()
                 self.controls_widget.show()
-                self.slider_seek.show()
                 self.show()
-                self.raise_()
-                self._reposition()
                 return
             
         self.lbl_status.hide()
         self.controls_widget.show()
-        self.slider_seek.show()
         self.show()
-        self.raise_()
-        self._reposition()
         
         if self._source_audio_path != audio_path:
             self._source_audio_path = audio_path
@@ -1736,14 +1880,11 @@ class AudioPreviewWidget(QFrame):
             self.player.setSource(QUrl.fromLocalFile(assembled_audio_path))
             self.lbl_status.hide()
             self.controls_widget.show()
-            self.slider_seek.show()
             self.slider_seek.setValue(0)
             self.current_word_idx = -1
             self.last_jumped_ts = -1.0
             self._clear_highlights()
             self.show()
-            self.raise_()
-            self._reposition()
 
     def set_position_ms(self, ms):
         import time
@@ -1770,14 +1911,37 @@ class AudioPreviewWidget(QFrame):
             self._real_start_time = time.time()
             self.player.play()
             self.update_timer.start()
+    def _force_system_volume(self, v):
+        import os
+        if os.name != 'posix': return
+        import subprocess, sys, re, threading
+        def _task():
+            try:
+                import time
+                time.sleep(0.1) # Wait for QMediaPlayer to establish the sink-input
+                script_name = os.path.basename(sys.argv[0])
+                out = subprocess.check_output(['pactl', 'list', 'sink-inputs'], text=True)
+                current_id = None
+                for line in out.splitlines():
+                    if 'Sink Input' in line or 'odpływ wejścia' in line:
+                        m = re.search(r'(?:#|^)(\d+)\.?', line)
+                        if m: current_id = m.group(1)
+                    if script_name in line and current_id:
+                        subprocess.call(['pactl', 'set-sink-input-volume', current_id, f"{v}%"])
+            except Exception:
+                pass
+        threading.Thread(target=_task, daemon=True).start()
 
     def on_state_changed(self, state):
         from PySide6.QtMultimedia import QMediaPlayer
         if state == QMediaPlayer.PlayingState:
-            self.btn_play.setText("⏸")
+            self.btn_play.update_icon("player-stop.png")
             self.update_timer.start()
+            vol = self.slider_vol.value()
+            self.audio_output.setVolume(vol / 100.0)
+            self._force_system_volume(vol)
         else:
-            self.btn_play.setText("▶")
+            self.btn_play.update_icon("player-play.png")
             self.update_timer.stop()
             if state == QMediaPlayer.StoppedState:
                 self._clear_highlights()
@@ -1789,6 +1953,29 @@ class AudioPreviewWidget(QFrame):
     def skip_backward(self):
         curr_t = self._get_audio_t()
         self.set_position_ms(int(max(0.0, curr_t - 3.0) * 1000))
+
+    def _on_volume_changed(self, v):
+        self.audio_output.setVolume(v / 100.0)
+        self._force_system_volume(v)
+        import os
+        from PySide6.QtGui import QPixmap
+        _src_dir = os.path.dirname(os.path.abspath(__file__))
+        _prod_assets_dir = os.path.join(_src_dir, "layout")
+        _dev_assets_dir = os.path.join(os.path.dirname(_src_dir), "assets", "layout")
+        _assets_dir = _prod_assets_dir if os.path.exists(_prod_assets_dir) else _dev_assets_dir
+        
+        if v > 70:
+            path = os.path.join(_assets_dir, "volume-max.png")
+        elif v >= 40:
+            path = os.path.join(_assets_dir, "volume-mid.png")
+        else:
+            path = os.path.join(_assets_dir, "volume-min.png")
+            
+        from PySide6.QtCore import Qt
+        pixmap = QPixmap(path)
+        if not pixmap.isNull():
+            pixmap = pixmap.scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.lbl_vol_icon.setPixmap(pixmap)
 
     def change_speed(self, text):
         from PySide6.QtMultimedia import QMediaPlayer
@@ -1803,6 +1990,34 @@ class AudioPreviewWidget(QFrame):
             self._start_pos_s = self._get_audio_t()
             self._real_start_time = time.time()
         self.player.setPlaybackRate(new_rate)
+
+    def _on_user_scroll(self, action):
+        if not getattr(self, "tgl_centered", None): return
+        if self.tgl_centered.isChecked():
+            self.tgl_centered.setChecked(False)
+
+    def _on_tgl_centered_changed(self, state):
+        if state:
+            self._center_current_word()
+
+    def _center_current_word(self):
+        if getattr(self, 'current_word_idx', -1) == -1: return
+        canvas = getattr(self.main_window, 'text_canvas', None)
+        if not canvas or not getattr(canvas, 'words_data', None): return
+        
+        words = canvas.words_data
+        if 0 <= self.current_word_idx < len(words):
+            w = words[self.current_word_idx]
+            if '_rect' in w:
+                rect = w['_rect']
+                scroll_area = getattr(self.main_window, 'scroll_area', None)
+                if scroll_area:
+                    scroll_area.ensureVisible(rect.x(), rect.y(), 50, 50)
+                    vp_h = scroll_area.viewport().height()
+                    vbar = scroll_area.verticalScrollBar()
+                    target_y = rect.center().y()
+                    new_val = int(target_y - vp_h / 2)
+                    vbar.setValue(max(vbar.minimum(), min(new_val, vbar.maximum())))
 
     def _on_seek_pressed(self):
         self._seek_dragging = True
@@ -1820,7 +2035,8 @@ class AudioPreviewWidget(QFrame):
             t = value / 1000.0 * dur / 1000.0
             cur_m, cur_s = divmod(int(t), 60)
             dur_m, dur_s = divmod(int(dur / 1000.0), 60)
-            self.lbl_time.setText(f"{cur_m:02d}:{cur_s:02d} / {dur_m:02d}:{dur_s:02d}")
+            self.lbl_time_curr.setText(f"{cur_m}:{cur_s:02d}")
+            self.lbl_time_total.setText(f"{dur_m}:{dur_s:02d}")
 
     def _audio_to_original_time(self, audio_t):
         if not self.clean_ops: return audio_t
@@ -1858,7 +2074,8 @@ class AudioPreviewWidget(QFrame):
         dur = self.player.duration() / 1000.0
         cur_m, cur_s = divmod(int(audio_t), 60)
         dur_m, dur_s = divmod(int(dur), 60)
-        self.lbl_time.setText(f"{cur_m:02d}:{cur_s:02d} / {dur_m:02d}:{dur_s:02d}")
+        self.lbl_time_curr.setText(f"{cur_m}:{cur_s:02d}")
+        self.lbl_time_total.setText(f"{dur_m}:{dur_s:02d}")
         
         # Update seek slider position (skip if user is dragging)
         if not self._seek_dragging and dur > 0:
@@ -1878,7 +2095,7 @@ class AudioPreviewWidget(QFrame):
                 
         if found_idx >= 0 and canvas.words_data[found_idx].get('type') == 'silence':
             pass
-        elif found_idx != self.current_word_idx:
+        elif found_idx != getattr(self, 'current_word_idx', -1):
             self._clear_highlights()
             self.current_word_idx = found_idx
             if found_idx >= 0:
@@ -1887,9 +2104,12 @@ class AudioPreviewWidget(QFrame):
                 canvas.update()
                 
                 start_ts = w.get('start', 0)
-                if abs(start_ts - self.last_jumped_ts) > 0.05:
+                if abs(start_ts - getattr(self, 'last_jumped_ts', 0)) > 0.05:
                     self.last_jumped_ts = start_ts
                     # Playhead jump is purely manual via CTRL+LPM now.
+                    
+        if getattr(self, "tgl_centered", None) and self.tgl_centered.isChecked():
+            self._center_current_word()
                         
     def _clear_highlights(self):
         canvas = getattr(self.main_window, 'text_canvas', None)
@@ -8864,8 +9084,7 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self._main_h_splitter.setStretchFactor(1, 1)
         self._main_h_splitter.setStretchFactor(2, 0)
 
-        self.audio_preview = AudioPreviewWidget(self._stack.widget(2), self)
-        self._main_h_splitter.setHandleWidth(10)
+        self._main_h_splitter.setHandleWidth(6)
         self._main_h_splitter.setStyleSheet("QSplitter { border: none; background: transparent; }")
 
         # Add everything to main layout in exact order
@@ -9066,14 +9285,18 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self.btn_analyze_standalone.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_analyze_standalone.setFixedHeight(35)
         self.btn_analyze_standalone.setStyleSheet(
-            f"QPushButton {{ background-color: {config.BTN_BG}; border: 1px solid #111; border-radius: 4px; color: #fff; font-weight: bold; padding: 8px; }}"
+            f"QPushButton {{ background-color: {config.BTN_BG}; border: 1px solid #111; border-radius: 4px; color: #fff; font-weight: bold; padding: 8px; }} "
+            f"QPushButton:hover {{ background-color: #1ed760; }}"
         )
         l_script_analysis.addWidget(self.btn_analyze_standalone)
 
         self.btn_analyze_compare = QPushButton(self.txt("btn_analyze_compare"))
         self.btn_analyze_compare.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_analyze_compare.setFixedHeight(35)
-        self.btn_analyze_compare.setStyleSheet(f"background-color: {config.BTN_BG}; color: white; font-weight: bold; font-size: 12pt; border: none; border-radius: 4px; padding: 10px;")
+        self.btn_analyze_compare.setStyleSheet(
+            f"QPushButton {{ background-color: {config.BTN_BG}; color: white; font-weight: bold; font-size: 12pt; border: none; border-radius: 4px; padding: 10px; }} "
+            f"QPushButton:hover {{ background-color: #1ed760; }}"
+        )
         l_script_analysis.addWidget(self.btn_analyze_compare)
 
         self.btn_side_by_side_compare = QPushButton(self.txt("btn_side_by_side_compare"))
@@ -11378,6 +11601,9 @@ class BadWordsGUI(FramelessWindowMixin, _BaseMainWindow):
         self.editor_view_stack.addWidget(normal_editor_page)
         self.editor_view_stack.addWidget(self.sbs_loading_page)
         layout.addWidget(self.editor_view_stack)
+        
+        self.audio_preview = AudioPreviewWidget(page, self)
+        layout.addWidget(self.audio_preview)
         
         return page
 
